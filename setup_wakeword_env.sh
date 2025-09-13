@@ -44,9 +44,9 @@ pip install --upgrade pip
 echo "🔧 Installing core packages..."
 pip install jupyterlab jupyter
 
-# Install PyTorch with GPU support
+# Install PyTorch with GPU support (use latest available version)
 echo "🔥 Installing PyTorch with CUDA support..."
-pip install torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 --index-url https://download.pytorch.org/whl/cu118
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 
 # Install audio processing packages
 echo "🎵 Installing audio processing packages..."
@@ -90,7 +90,7 @@ Then access from Windows at: `http://localhost:8888`
 
 ## GPU Support Status:
 ✅ GPU support is already installed with this script!
-- PyTorch 2.0.1 with CUDA 11.8 support included
+- Latest PyTorch with CUDA 11.8 support included
 - To verify GPU: `python -c "import torch; print(torch.cuda.is_available())"`
 EOF
 
