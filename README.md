@@ -328,6 +328,19 @@ jupyter lab --generate-config
 jupyter lab clean
 ```
 
+**Problem**: Kernel not found or kernel errors
+```bash
+# Fix kernel configuration
+source wakeword_env/bin/activate
+pip install ipykernel
+python -m ipykernel install --user --name wakeword_env --display-name "Wakeword (GPU)"
+
+# Remove broken kernel if needed
+jupyter kernelspec uninstall wakeword_env -y
+
+# Restart JupyterLab completely after kernel changes
+```
+
 **Problem**: Can't access from Windows
 - Check WSL networking: `ip addr show eth0`
 - Use correct IP: `jupyter lab --ip=0.0.0.0`
