@@ -56,6 +56,14 @@ pip install librosa soundfile audioread numpy pandas matplotlib seaborn scikit-l
 echo "📦 Installing additional dependencies..."
 pip install sympy filelock fsspec networkx
 
+# Install Jupyter kernel support
+echo "🔧 Installing Jupyter kernel support..."
+pip install ipykernel
+
+# Create Jupyter kernel for this environment
+echo "🎯 Creating Jupyter kernel..."
+python -m ipykernel install --user --name wakeword_env --display-name "Wakeword (GPU)"
+
 # Create required directories
 echo "📁 Creating data directories..."
 mkdir -p wakeword_data negative_data background_noise
@@ -106,6 +114,7 @@ echo "   1. Copy your audio files to the directories above"
 echo "   2. Run: source wakeword_env/bin/activate"
 echo "   3. Run: jupyter lab --ip=0.0.0.0 --port=8888 --no-browser"
 echo "   4. Open wakeword_training.ipynb in your browser"
+echo "   5. Select 'Wakeword (GPU)' kernel from the notebook dropdown"
 echo ""
 echo "🎯 Environment is ready for training!"
 echo ""
