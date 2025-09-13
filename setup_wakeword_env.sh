@@ -7,9 +7,17 @@ set -e
 
 echo "🚀 Setting up wakeword training environment..."
 
-# Check if we're in WSL
-if ! grep -q Microsoft /proc/version; then
-    echo "❌ This script is designed for WSL Ubuntu environment"
+# Check if we're in WSL (multiple detection methods)
+if ! (grep -q Microsoft /proc/version 2>/dev/null || grep -q WSL /proc/version 2>/dev/null || uname -r | grep -qi microsoft 2>/dev/null || [ -n "$WSL_DISTRO_NAME" ]); then
+    echo "⚠️  Warning: This script is designed for WSL Ubuntu environment"
+    echo "   Continuing anyway, but some features may not work as expected..."
+    read -p "Press Enter to continue or Ctrl+C to abort: "
+fi
+
+# Check if python3 is available
+if ! command -v python3 &> /dev/null; then
+    echo "❌ Python3 is not installed. Please install Python3 first:"
+    echo "   sudo apt update && sudo apt install python3 python3-pip python3-venv"
     exit 1
 fi
 
@@ -17,6 +25,11 @@ fi
 if [ ! -d "wakeword_env" ]; then
     echo "📦 Creating Python virtual environment..."
     python3 -m venv wakeword_env
+    if [ $? -ne 0 ]; then
+        echo "❌ Failed to create virtual environment. Make sure python3-venv is installed:"
+        echo "   sudo apt install python3-venv"
+        exit 1
+    fi
 fi
 
 # Activate virtual environment
@@ -31,9 +44,9 @@ pip install --upgrade pip
 echo "🔧 Installing core packages..."
 pip install jupyterlab jupyter
 
-# Install PyTorch (CPU version for now - replace with CUDA version when available)
-echo "🔥 Installing PyTorch..."
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+# Install PyTorch with GPU support
+echo "🔥 Installing PyTorch with CUDA support..."
+pip install torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 --index-url https://download.pytorch.org/whl/cu118
 
 # Install audio processing packages
 echo "🎵 Installing audio processing packages..."
@@ -75,10 +88,10 @@ Then access from Windows at: `http://localhost:8888`
 2. Open `wakeword_training.ipynb` in JupyterLab
 3. Run the cells to train your wakeword model
 
-## For GPU Support (when CUDA is properly installed):
-```bash
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
-```
+## GPU Support Status:
+✅ GPU support is already installed with this script!
+- PyTorch 2.0.1 with CUDA 11.8 support included
+- To verify GPU: `python -c "import torch; print(torch.cuda.is_available())"`
 EOF
 
 echo "✅ Setup completed successfully!"
