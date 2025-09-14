@@ -1,0 +1,11 @@
+Wakeword Detection Model Architecture
+================================
+
+Model Type: CNN + LSTM
+Input Shape: (1, 80, 31)
+Hidden Size: 256
+Number of Layers: 2
+Dropout: 0.6
+Number of Classes: 2
+Parameters: 1,014,786
+Device: cuda
