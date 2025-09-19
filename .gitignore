@@ -30,6 +30,7 @@ ENV/
 env.bak/
 venv.bak/
 wakeword_env/
+gradio_venv_gpu/
 
 # Jupyter Notebook
 .ipynb_checkpoints
@@ -48,14 +49,63 @@ wakeword_env/
 *.ogg
 *.m4a
 *.wma
-!test_audio/*.wav
+*.aiff
+*.au
+*.snd
 
-# Data directories
-wakeword_data/
-negative_data/
+# Allow specific test audio
+!test_files/**/*.wav
+!test_files/**/*.mp3
+!test_files/**/*.flac
+
+# Data directories (keep structure, ignore contents)
+positive_dataset/
+negative_dataset/
 background_noise/
-data/
 datasets/
+features/
+feature_datasets/
+
+# Ignore large dataset files but keep directory structure
+positive_dataset/**/*.wav
+positive_dataset/**/*.mp3
+positive_dataset/**/*.flac
+positive_dataset/**/*.aac
+positive_dataset/**/*.ogg
+positive_dataset/**/*.m4a
+
+negative_dataset/**/*.wav
+negative_dataset/**/*.mp3
+negative_dataset/**/*.flac
+negative_dataset/**/*.aac
+negative_dataset/**/*.ogg
+negative_dataset/**/*.m4a
+
+background_noise/**/*.wav
+background_noise/**/*.mp3
+background_noise/**/*.flac
+background_noise/**/*.aac
+background_noise/**/*.ogg
+background_noise/**/*.m4a
+
+datasets/**/*.wav
+datasets/**/*.mp3
+datasets/**/*.flac
+datasets/**/*.aac
+datasets/**/*.ogg
+datasets/**/*.m4a
+
+features/**/*.npy
+features/**/*.npz
+features/**/*.pt
+features/**/*.pth
+features/**/*.pkl
+
+feature_datasets/**/*.npy
+feature_datasets/**/*.npz
+feature_datasets/**/*.pt
+feature_datasets/**/*.pth
+feature_datasets/**/*.pkl
 
 # Training outputs
 models/
@@ -66,6 +116,30 @@ runs/
 saved_models/
 *.h5
 *.keras
+*.onnx
+*.tflite
+
+# PyTorch specific
+*.pth
+*.pt
+*.pkl
+
+# Training artifacts
+training_history/
+confusion_matrix/
+results/
+predictions/
+evaluation/
+metrics/
+learning_curves/
+loss_curves/
+
+# Gradio specific
+.gradio/
+gradio_cache/
+tmp_gradio/
+gradio_files/
+*.gradio
 
 # Temporary files
 *.tmp
@@ -153,16 +227,20 @@ site/
 *.npy
 *.npz
 *.mat
+*.spectrogram
+*.mel
 
 # Model and training artifacts
 *.tfevents.*
 events.out.tfevents.*
 graph.pbtxt
 
-# WSL specific
+# WSL and Windows specific
 *.exe
 *.bat
 *.cmd
+*.ps1
+*.sh
 
 # Large files over 100MB
 *.zip
@@ -171,6 +249,8 @@ graph.pbtxt
 *.tar.bz2
 *.rar
 *.7z
+*.dmg
+*.iso
 
 # CUDA cache
 *.ptx
@@ -181,4 +261,102 @@ graph.pbtxt
 core
 core.*
 *.dmp
-GLM4.5.ps1
+
+# System and temp files
+*.log
+*.out
+*.err
+*.cache
+*.lock
+*.pid
+*.seed
+
+# macOS specific
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+.AppleDouble
+.LSOverride
+
+# Windows specific
+desktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+
+# Machine Learning specific
+*.model
+*.weights
+*.bin
+*.data-*
+*.index
+*.meta
+
+# Audio Processing specific
+*.mfcc
+*.chroma
+*.tonnetz
+*.zero_crossing_rate
+*.spectral_centroid
+*.spectral_bandwidth
+*.spectral_rolloff
+*.tempo
+*.beat
+
+# Configuration and secrets
+*.yaml
+*.yml
+!config/*.yaml
+!config/*.yml
+config/secrets.yaml
+config/secrets.yml
+.env
+.env.local
+.env.*.local
+
+# IDE and Editor specific
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.netrwhist
+.viminfo
+.exrc
+
+# Backup files
+*.bak
+*.backup
+*.old
+*_backup*
+*_old*
+
+# Debug files
+debug/
+debug_output/
+debug_logs/
+*.debug
+*.trace
+
+# Performance monitoring
+*.prof
+*.profile
+*.stats
+performance/
+benchmark_results/
+
+# Temporary directories
+temp/
+tmp/
+temp_files/
+cache/
+cached/
+*.cache
+*.tmp

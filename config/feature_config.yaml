@@ -1,0 +1,69 @@
+# Feature Extraction Configuration for Wakeword Training
+# This configuration controls mel-spectrogram extraction parameters
+
+# Audio parameters
+audio:
+  sample_rate: 16000
+  duration: 2.0  # seconds
+  channels: 1
+
+# Mel-spectrogram parameters
+mel:
+  n_mels: 40          # Number of mel bands
+  n_fft: 1024         # FFT window size
+  hop_length: 160     # Hop length between frames
+  win_length: 400     # Window length
+  fmin: 20            # Minimum frequency
+  fmax: 8000          # Maximum frequency
+  power: 2.0          # Power spectrogram
+  normalized: true     # Normalize features
+
+# Storage settings
+storage:
+  format: "float32"    # Data type for .npy files
+  compression: true    # Use numpy compression
+  cache_size: 1000     # Number of features to cache in memory
+
+# Feature processing
+processing:
+  delta: true          # Include delta features
+  delta_delta: false  # Include delta-delta features
+  mean_norm: true      # Mean normalization
+  var_norm: false      # Variance normalization
+
+# Augmentation settings
+augmentation:
+  time_shift: true
+  pitch_shift: true
+  speed_change: true
+  noise_addition: true
+  rirs_augmentation: false  # Enable when RIRS dataset is available
+
+# MIT RIRS settings
+rirs:
+  dataset_path: "datasets/mit_rirs/rir_data"
+  snr_range: [5, 20]   # Signal-to-noise ratio range for RIRS
+  probability: 0.3      # Probability of applying RIRS augmentation
+  max_rir_length: 3.0   # Maximum RIR length in seconds
+
+# Feature cache settings
+cache:
+  enabled: true
+  max_size_mb: 1000     # Maximum cache size in MB
+  ttl_hours: 24         # Time-to-live for cache entries
+  persist: true         # Save cache to disk
+
+# Training settings
+training:
+  batch_size: 32
+  shuffle: true
+  num_workers: 4
+  pin_memory: true
+  drop_last: false
+
+# Validation settings
+validation:
+  batch_size: 16
+  shuffle: false
+  num_workers: 2
+  pin_memory: true
