@@ -16,7 +16,7 @@ import json
 from dataclasses import dataclass
 import yaml
 
-from feature_extractor import FeatureExtractor, RIRAugmentation
+from .feature_extractor import FeatureExtractor, RIRAugmentation
 
 
 @dataclass
@@ -187,8 +187,8 @@ class EnhancedWakewordDataset(Dataset):
                 feature_path = self.feature_files[idx]
                 features = self._load_features(feature_path)
                 return {
-                    'features': torch.FloatTensor(features),
-                    'label': torch.LongTensor([label]),
+                    'features': torch.from_numpy(np.ascontiguousarray(features, dtype=np.float32)).clone(),
+                    'label': torch.tensor(label, dtype=torch.long),
                     'source': 'feature',
                     'path': feature_path
                 }
@@ -252,8 +252,8 @@ class EnhancedWakewordDataset(Dataset):
                 features = self._extract_mel_spectrogram(audio)
 
             return {
-                'features': torch.FloatTensor(features),
-                'label': torch.LongTensor([label]),
+                'features': torch.from_numpy(np.ascontiguousarray(features, dtype=np.float32)).clone(),
+                'label': torch.tensor(label, dtype=torch.long),
                 'source': 'audio',
                 'path': audio_path
             }
@@ -367,8 +367,8 @@ class EnhancedWakewordDataset(Dataset):
         """Get default item for error cases"""
         features = self._get_default_features()
         return {
-            'features': torch.FloatTensor(features),
-            'label': torch.LongTensor([label]),
+            'features': torch.from_numpy(np.ascontiguousarray(features, dtype=np.float32)).clone(),
+            'label': torch.tensor(label, dtype=torch.long),
             'source': 'default',
             'path': 'default'
         }

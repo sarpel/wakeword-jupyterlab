@@ -80,7 +80,13 @@ class AudioProcessor:
     def normalize_audio(self, audio):
         if len(audio) == 0:
             return audio
-        return audio / np.max(np.abs(audio))
+        max_abs = np.max(np.abs(audio))
+        if not np.isfinite(max_abs) or max_abs < 1e-8:
+            return np.zeros_like(audio)
+        normalized = audio / max_abs
+        if np.isnan(normalized).any() or np.isinf(normalized).any():
+            normalized = np.nan_to_num(normalized, nan=0.0, posinf=0.0, neginf=0.0)
+        return normalized
 
     def pad_or_truncate(self, audio, target_length):
         if len(audio) > target_length:
@@ -91,6 +97,10 @@ class AudioProcessor:
 
     def audio_to_mel(self, audio):
         if len(audio) == 0:
+            return np.zeros((self.config.N_MELS, 31))
+
+        audio = np.nan_to_num(audio, nan=0.0, posinf=0.0, neginf=0.0)
+        if np.max(np.abs(audio)) < 1e-8:
             return np.zeros((self.config.N_MELS, 31))
 
         mel_spec = librosa.feature.melspectrogram(
@@ -282,7 +292,7 @@ class EnhancedWakewordDataset(Dataset):
         audio = self.processor.load_audio(file_path)
 
         if audio is None:
-            mel_spec = np.zeros((self.processor.config.N_MELS, 31))
+            mel_spec = np.zeros((self.processor.config.N_MELS, 31), dtype=np.float32)
         else:
             audio = self.processor.normalize_audio(audio)
             target_length = int(self.processor.config.SAMPLE_RATE * self.processor.config.DURATION)
@@ -296,8 +306,9 @@ class EnhancedWakewordDataset(Dataset):
 
             mel_spec = self.processor.audio_to_mel(audio)
 
-        mel_tensor = torch.FloatTensor(mel_spec).unsqueeze(0)
-        label_tensor = torch.LongTensor([label])
+        mel_array = np.ascontiguousarray(mel_spec, dtype=np.float32)
+        mel_tensor = torch.from_numpy(mel_array).unsqueeze(0).clone()
+        label_tensor = torch.tensor(label, dtype=torch.long)
 
         return mel_tensor, label_tensor
 
@@ -741,8 +752,12 @@ class WakewordTrainingApp:
             )
 
             # Create dataloaders
-            self.train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=2)
-            self.val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=2)
+            # On Windows, multi-processing workers can cause storage resize errors with numpy/librosa.
+            # Use single-process loading there for stability.
+            import os as _os
+            _num_workers = 0 if _os.name == 'nt' else 2
+            self.train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=_num_workers)
+            self.val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=_num_workers)
 
             data_info = f"""
 ✅ Veri Yükleme Başarılı!
@@ -792,7 +807,10 @@ class WakewordTrainingApp:
 
     def get_training_status(self):
         if not self.trainer.is_training and not self.trainer.training_complete:
-            return "Eğitim başlatılmadı", []
+            fig = go.Figure()
+            fig.add_annotation(text="Henüz eğitim başlatılmadı", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
+            fig.update_layout(height=600, title_text="Training Progress")
+            return "Eğitim başlatılmadı", fig
 
         if self.trainer.is_training:
             status = f"Eğitim devam ediyor - Epoch {self.trainer.current_epoch}/{self.trainer.config.EPOCHS}"
