@@ -391,6 +391,62 @@ class WakewordTrainer:
         self.is_training = False
         self.training_complete = False
 
+        # Pause/Resume support
+        self.paused = False
+        import threading as _thr
+        self._pause_event = _thr.Event()
+        self._pause_event.set()  # allow running by default
+
+        # Gradient clipping configurable
+        self.grad_clip_max_norm = 1.0
+
+    def pause(self):
+        self.paused = True
+        self._pause_event.clear()
+
+    def resume(self):
+        self.paused = False
+        self._pause_event.set()
+
+    def _save_last_checkpoint(self, epoch, train_loss, train_acc, val_loss, val_acc, path='last_checkpoint.pth'):
+        try:
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': self.model.state_dict(),
+                'optimizer_state_dict': self.optimizer.state_dict(),
+                'scheduler_state_dict': self.scheduler.state_dict() if self.scheduler else None,
+                'val_acc': val_acc,
+                'train_acc': train_acc,
+                'train_loss': train_loss,
+                'val_loss': val_loss,
+                'best_val_acc': self.best_val_acc,
+                'epochs_no_improve': self.epochs_no_improve,
+                'config': {
+                    'LEARNING_RATE': self.config.LEARNING_RATE,
+                    'BATCH_SIZE': self.config.BATCH_SIZE,
+                    'EPOCHS': self.config.EPOCHS,
+                }
+            }, path)
+        except Exception:
+            pass
+
+    def load_last_checkpoint(self, path='last_checkpoint.pth'):
+        if not os.path.exists(path):
+            raise FileNotFoundError("Checkpoint bulunamadı: last_checkpoint.pth")
+        ckpt = torch.load(path, map_location=self.device)
+        self.model.load_state_dict(ckpt['model_state_dict'])
+        if ckpt.get('optimizer_state_dict') is not None:
+            self.optimizer.load_state_dict(ckpt['optimizer_state_dict'])
+        if ckpt.get('scheduler_state_dict') and self.scheduler:
+            try:
+                self.scheduler.load_state_dict(ckpt['scheduler_state_dict'])
+            except Exception:
+                pass
+        self.best_val_acc = float(ckpt.get('best_val_acc', self.best_val_acc))
+        self.epochs_no_improve = int(ckpt.get('epochs_no_improve', self.epochs_no_improve))
+        # Resume from next epoch index
+        return int(ckpt.get('epoch', -1)) + 1
+
     def train_epoch(self, train_loader, progress_callback=None):
         self.model.train()
         running_loss = 0.0
@@ -398,13 +454,18 @@ class WakewordTrainer:
         total = 0
 
         for batch_idx, (data, target) in enumerate(train_loader):
+            # Handle pause/resume
+            self._pause_event.wait()
+            if not self.is_training:
+                break
+
             data, target = data.to(self.device), target.to(self.device).squeeze()
 
             self.optimizer.zero_grad()
             output = self.model(data)
             loss = self.criterion(output, target)
 
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.grad_clip_max_norm)
 
             loss.backward()
             self.optimizer.step()
@@ -431,6 +492,10 @@ class WakewordTrainer:
 
         with torch.no_grad():
             for data, target in val_loader:
+                # Allow pause during validation too
+                self._pause_event.wait()
+                if not self.is_training:
+                    break
                 data, target = data.to(self.device), target.to(self.device).squeeze()
                 output = self.model(data)
                 loss = self.criterion(output, target)
@@ -445,21 +510,31 @@ class WakewordTrainer:
 
         return epoch_loss, epoch_acc
 
-    def train(self, train_loader, val_loader, epochs, progress_callback=None):
+    def train(self, train_loader, val_loader, epochs, progress_callback=None,
+              auto_extend=False, extend_step=5, max_extra_epochs=0,
+              plateau_delta=0.001, worsen_patience=3):
         self.is_training = True
         self.training_complete = False
+        self._pause_event.set()  # ensure running
 
-        print(f"Starting training for {epochs} epochs...")
+        initial_epochs = int(epochs)
+        target_epochs = int(epochs)
+        extra_used = 0
+        self.config.EPOCHS = target_epochs  # for UI
 
-        for epoch in range(epochs):
-            if not self.is_training:
-                break
+        print(f"Starting training for {target_epochs} epochs...")
 
+        worsening_streak = 0
+        last_val_loss = None
+
+        epoch = 0
+        while epoch < target_epochs and self.is_training:
             self.current_epoch = epoch + 1
 
             train_loss, train_acc = self.train_epoch(train_loader, progress_callback)
             val_loss, val_acc = self.validate(val_loader)
 
+            # Save progress
             self.train_losses.append(train_loss)
             self.val_losses.append(val_loss)
             self.train_accuracies.append(train_acc)
@@ -469,28 +544,55 @@ class WakewordTrainer:
 
             # Console log for headless supervision
             try:
-                print(f"[Epoch {epoch+1}/{epochs}] Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.2f}% | Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.2f}% | Best Val Acc: {self.best_val_acc:.2f}%")
+                print(f"[Epoch {self.current_epoch}/{target_epochs}] Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.2f}% | Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.2f}% | Best Val Acc: {self.best_val_acc:.2f}%")
             except Exception:
                 pass
 
-            if val_acc > self.best_val_acc:
+            # Save checkpoints
+            self._save_last_checkpoint(epoch, train_loss, train_acc, val_loss, val_acc)
+
+            # Best model tracking
+            if val_acc > self.best_val_acc + 1e-9:
                 self.best_val_acc = val_acc
                 self.epochs_no_improve = 0
-
-                torch.save({
-                    'epoch': epoch,
-                    'model_state_dict': self.model.state_dict(),
-                    'optimizer_state_dict': self.optimizer.state_dict(),
-                    'val_acc': val_acc,
-                    'train_acc': train_acc,
-                    'train_loss': train_loss,
-                    'val_loss': val_loss,
-                }, 'best_wakeword_model.pth')
+                try:
+                    torch.save({
+                        'epoch': epoch,
+                        'model_state_dict': self.model.state_dict(),
+                        'optimizer_state_dict': self.optimizer.state_dict(),
+                        'val_acc': val_acc,
+                        'train_acc': train_acc,
+                        'train_loss': train_loss,
+                        'val_loss': val_loss,
+                    }, 'best_wakeword_model.pth')
+                except Exception:
+                    pass
+                # Auto-extend if enabled and nearing end
+                if auto_extend and extra_used < max_extra_epochs and (epoch + 1) >= target_epochs:
+                    add_epochs = min(extend_step, max_extra_epochs - extra_used)
+                    target_epochs += add_epochs
+                    self.config.EPOCHS = target_epochs
+                    extra_used += add_epochs
+                    print(f"Auto-extend: increasing target epochs to {target_epochs} (added {add_epochs})")
             else:
                 self.epochs_no_improve += 1
 
+            # Worsening detection
+            if last_val_loss is not None and val_loss > last_val_loss + plateau_delta:
+                worsening_streak += 1
+            else:
+                worsening_streak = 0
+            last_val_loss = val_loss
+
+            # Early stopping
             if self.epochs_no_improve >= self.patience:
+                print("Early stopping: no improvement within patience.")
                 break
+            if worsen_patience and worsening_streak >= worsen_patience:
+                print("Stopping: consecutive validation loss worsening detected.")
+                break
+
+            epoch += 1
 
         self.is_training = False
         self.training_complete = True
@@ -780,6 +882,37 @@ class WakewordTrainingApp:
         self._current_batch = 0
         self._total_batches = 0
 
+        # Live metrics text
+        self._last_metrics_text = ""
+
+    # Control methods
+    def pause_training(self):
+        if self.trainer and self.trainer.is_training:
+            self.trainer.pause()
+            return "Eğitim duraklatıldı"
+        return "Eğitim zaten duraklatılmış veya başlamadı"
+
+    def resume_training(self):
+        if self.trainer and self.trainer.paused:
+            self.trainer.resume()
+            return "Eğitim devam ettirildi"
+        return "Devam ettirilecek bir eğitim yok"
+
+    def continue_from_checkpoint(self, epochs=None):
+        try:
+            start_next_epoch = self.trainer.load_last_checkpoint('last_checkpoint.pth')
+            target_epochs = epochs if epochs is not None else self.trainer.config.EPOCHS
+
+            def training_thread():
+                self.trainer.train(self.train_loader, self.val_loader, target_epochs, self.update_progress)
+
+            thread = threading.Thread(target=training_thread)
+            thread.daemon = True
+            thread.start()
+            return f"Checkpoint'ten devam ediliyor (başlayacağı epoch: {start_next_epoch})."
+        except Exception as e:
+            return f"Devam edilemedi: {e}"
+
     def load_data(self, positive_dir, negative_dir, background_dir, batch_size, val_split, test_split):
         try:
             # Load audio files
@@ -895,7 +1028,12 @@ class WakewordTrainingApp:
             self.model.dropout.p = dropout
 
             def training_thread():
-                self.trainer.train(self.train_loader, self.val_loader, epochs, self.update_progress)
+                # Enable auto-extend: add up to +20 epochs in steps of 5 if improving
+                self.trainer.train(
+                    self.train_loader, self.val_loader, epochs, self.update_progress,
+                    auto_extend=True, extend_step=5, max_extra_epochs=20,
+                    plateau_delta=0.001, worsen_patience=3
+                )
 
             thread = threading.Thread(target=training_thread)
             thread.daemon = True
@@ -946,7 +1084,18 @@ class WakewordTrainingApp:
             fig = go.Figure()
             fig.add_annotation(text="Henüz eğitim verisi yok", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
 
-        return status, fig
+        # Build current metrics text for quick glance
+        if len(self.trainer.train_losses) > 0:
+            i = -1
+            self._last_metrics_text = (
+                f"Epoch {self.trainer.current_epoch}/{self.trainer.config.EPOCHS}\n"
+                f"Train Loss: {self.trainer.train_losses[i]:.4f}\n"
+                f"Val Loss: {self.trainer.val_losses[i]:.4f}\n"
+                f"Train Acc: {self.trainer.train_accuracies[i]:.2f}%\n"
+                f"Val Acc: {self.trainer.val_accuracies[i]:.2f}%\n"
+                f"Best Val Acc: {self.trainer.best_val_acc:.2f}%"
+            )
+        return status, fig, self._last_metrics_text
 
     def stop_training(self):
         if self.trainer.is_training:
@@ -1179,6 +1328,9 @@ def create_enhanced_interface():
 
                         with gr.Row():
                             start_btn = gr.Button("▶️ Start Training", variant="primary")
+                            pause_btn = gr.Button("⏸️ Pause", variant="secondary")
+                            resume_btn = gr.Button("▶️ Resume", variant="secondary")
+                            cont_btn = gr.Button("🔁 Continue from Checkpoint", variant="secondary")
                             stop_btn = gr.Button("⏹️ Stop Training", variant="secondary")
                             save_btn = gr.Button("💾 Save Model", variant="secondary")
 
@@ -1199,7 +1351,7 @@ def create_enhanced_interface():
                         """, interactive=False, lines=5)
 
                         gr.Markdown("### 📊 Current Metrics")
-                        current_metrics = gr.Textbox(label="Current Metrics", interactive=False, lines=6)
+                        current_metrics = gr.Textbox(label="Current Metrics", interactive=False, lines=8)
 
                         gr.Markdown("### 💾 Model Info")
                         model_info = gr.Textbox(label="Model Information", value=f"""
@@ -1339,6 +1491,21 @@ def create_enhanced_interface():
             outputs=[training_status]
         )
 
+        pause_btn.click(
+            lambda: app.pause_training(),
+            outputs=[training_status]
+        )
+
+        resume_btn.click(
+            lambda: app.resume_training(),
+            outputs=[training_status]
+        )
+
+        cont_btn.click(
+            lambda: app.continue_from_checkpoint(),
+            outputs=[training_status]
+        )
+
         stop_btn.click(
             stop_training_handler,
             outputs=[training_status]
@@ -1362,7 +1529,7 @@ def create_enhanced_interface():
         # Auto-refresh training plots
         timer.tick(
             update_training_plots,
-            outputs=[training_status, training_plots]
+            outputs=[training_status, training_plots, current_metrics]
         )
 
         # Update learning rate when dropdown changes

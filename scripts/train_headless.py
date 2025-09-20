@@ -39,8 +39,18 @@ def main():
     print(f"[Headless] Train: {train_len}, Val: {val_len}")
     print("[Headless] Starting training...")
     try:
-        # Run training synchronously
-        best_val = app.trainer.train(app.train_loader, app.val_loader, epochs)
+        # Run training synchronously with auto-extend and worsening/plateau detection
+        best_val = app.trainer.train(
+            app.train_loader,
+            app.val_loader,
+            epochs,
+            progress_callback=None,
+            auto_extend=True,
+            extend_step=5,
+            max_extra_epochs=20,
+            plateau_delta=0.001,
+            worsen_patience=3,
+        )
         print(f"[Headless] Training finished. Best Val Acc: {best_val:.2f}%")
     except Exception as e:
         print(f"[Headless] Training error: {e}")
