@@ -51,7 +51,7 @@ wakeword-jupyterlab/
 
 ### 3. **CUDA/GPU Support Fixed**
 - ✅ CUDA 11.8 installed and working
-- ✅ PyTorch 2.7.1 with CUDA support
+- ✅ PyTorch 2.1.2 with CUDA 11.8 support (torch==2.1.2+cu118, torchvision==0.16.2+cu118, torchaudio==2.1.2+cu118)
 - ✅ GPU detection: 1 GPU available
 - ✅ Removed conflicting packages
 
@@ -59,32 +59,28 @@ wakeword-jupyterlab/
 
 ### Environment
 - **Virtual Environment**: `venv/` (Python 3.10)
-- **PyTorch**: 2.7.1+cu118
+- **PyTorch**: 2.1.2+cu118
 - **CUDA**: 11.8
 - **GPU**: 1 GPU detected and available
 
 ### Key Dependencies
 - gradio==5.46.1
 - librosa==0.11.0
-- torch==2.7.1+cu118
-- torchvision==0.22.1+cu118
-- torchaudio==2.7.1+cu118
+- torch==2.1.2+cu118
+- torchvision==0.16.2+cu118
+- torchaudio==2.1.2+cu118
 
 ## 🎮 Usage
 
-### Start the application:
-```bash
-python launch_app.py
+### Start the application
+```powershell
+# Windows PowerShell
+./venv/Scripts/python.exe launch_app.py
 ```
 
-Or run it directly:
-```bash
-./venv/Scripts/python gradio_app.py
-```
-
-### Quick launch:
-```bash
-python launch_app.py
+Or run the Gradio app directly:
+```powershell
+./venv/Scripts/python.exe gradio_app.py
 ```
 
 ## ✅ Cleanup Summary
@@ -94,7 +90,8 @@ python launch_app.py
 3. **Simplified File Names**: Removed complex naming conventions
 4. **Organized Structure**: Created logical directory organization
 5. **Removed Redundant Files**: Deleted unnecessary scripts and files
-6. **Fixed Virtual Environment**: Renamed and cleaned up environment
+6. **Fixed Virtual Environment**: `.venv/` removed, single `venv/` kept and used by tasks
+7. **.gitignore Simplified**: Clean, safe patterns for venvs, datasets, models, logs; test audio exceptions preserved
 
 ## 📊 System Status
 

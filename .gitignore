@@ -1,20 +1,20 @@
-# Python
+###############################################
+# Python & Project .gitignore (clean version) #
+###############################################
+
+# Byte-compiled / cache
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
-.Python
+
+# Build / packaging
 build/
 develop-eggs/
 dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
-parts/
 sdist/
-var/
 wheels/
 pip-wheel-metadata/
 share/python-wheels/
@@ -24,8 +24,8 @@ share/python-wheels/
 MANIFEST
 
 # Virtual environments
-.venv/
 venv/
+.venv/
 env/
 ENV/
 env.bak/
@@ -33,16 +33,45 @@ venv.bak/
 wakeword_env/
 gradio_venv_gpu/
 
-# Jupyter Notebook
-.ipynb_checkpoints
-*.ipynb_checkpoints
+# Jupyter
+.ipynb_checkpoints/
+.pytest_cache/
+jupyter_runtime/
 
-# PyTorch
-*.pth
-*.pt
-*.pkl
+# Coverage
+coverage/
+*.lcov
+.nyc_output/
 
-# Audio files
+# Logs / temp
+*.log
+*.out
+*.err
+*.tmp
+*.temp
+*.cache
+*.lock
+*.pid
+*.seed
+tmp/
+temp/
+temp_files/
+
+# IDEs
+.idea/
+.vscode/
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Audio files (global ignore) - keep test fixtures
 *.wav
 *.mp3
 *.flac
@@ -53,13 +82,11 @@ gradio_venv_gpu/
 *.aiff
 *.au
 *.snd
-
-# Allow specific test audio
 !test_files/**/*.wav
 !test_files/**/*.mp3
 !test_files/**/*.flac
 
-# Data directories (keep structure, ignore contents)
+# Data directories (ignore contents)
 positive_dataset/
 negative_dataset/
 background_noise/
@@ -67,297 +94,106 @@ datasets/
 features/
 feature_datasets/
 
-# Ignore large dataset files but keep directory structure
-positive_dataset/**/*.wav
-positive_dataset/**/*.mp3
-positive_dataset/**/*.flac
-positive_dataset/**/*.aac
-positive_dataset/**/*.ogg
-positive_dataset/**/*.m4a
-
-negative_dataset/**/*.wav
-negative_dataset/**/*.mp3
-negative_dataset/**/*.flac
-negative_dataset/**/*.aac
-negative_dataset/**/*.ogg
-negative_dataset/**/*.m4a
-
-background_noise/**/*.wav
-background_noise/**/*.mp3
-background_noise/**/*.flac
-background_noise/**/*.aac
-background_noise/**/*.ogg
-background_noise/**/*.m4a
-
-datasets/**/*.wav
-datasets/**/*.mp3
-datasets/**/*.flac
-datasets/**/*.aac
-datasets/**/*.ogg
-datasets/**/*.m4a
-
-features/**/*.npy
-features/**/*.npz
-features/**/*.pt
-features/**/*.pth
-features/**/*.pkl
-
-feature_datasets/**/*.npy
-feature_datasets/**/*.npz
-feature_datasets/**/*.pt
-feature_datasets/**/*.pth
-feature_datasets/**/*.pkl
-
-# Training outputs
+# Model/training artifacts
 models/
+saved_models/
 checkpoints/
 logs/
-tensorboard/
 runs/
-saved_models/
-*.h5
-*.keras
-*.onnx
-*.tflite
-
-# PyTorch specific
-*.pth
-*.pt
-*.pkl
-
-# Training artifacts
+tensorboard/
 training_history/
-confusion_matrix/
 results/
 predictions/
 evaluation/
 metrics/
 learning_curves/
 loss_curves/
-
-# Gradio specific
-.gradio/
-gradio_cache/
-tmp_gradio/
-gradio_files/
-*.gradio
-
-# Temporary files
-*.tmp
-*.temp
-*.log
-*.out
-*.err
-.DS_Store
-Thumbs.db
-
-# System files
-*.exe
-*.dll
-*.so
-*.dylib
-
-# OS files
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-
-# IDE files
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# Runtime data
-pids
-*.pid
-*.seed
-*.pid.lock
-
-# Coverage directory used by tools like istanbul
-coverage/
-*.lcov
-
-# nyc test coverage
-.nyc_output
-
-# Environment variables
-.env
-.env.local
-.env.*.local
-
-# IDE - VSCode
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
-
-# IDE - PyCharm
-.idea/
-
-# Project specific
-temp/
-temp_files/
-debug/
-test_output/
-gpu_stats.txt
-training_logs.txt
-*.checkpoint
-*.checkpoint.*
-
-# Jupyter runtime
-*.html
-jupyter_runtime/
-
-# Git
-.git
-.gitignore
-.gitattributes
-
-# Documentation (if built)
-docs/_build/
-site/
-
-# Audio processing artifacts
-*.npy
-*.npz
-*.mat
-*.spectrogram
-*.mel
-
-# Model and training artifacts
 *.tfevents.*
 events.out.tfevents.*
 graph.pbtxt
 
-# WSL and Windows specific
-*.exe
-*.bat
-*.cmd
-*.ps1
-*.sh
-
-# Large files over 100MB
-*.zip
-*.tar
-*.tar.gz
-*.tar.bz2
-*.rar
-*.7z
-*.dmg
-*.iso
-
-# CUDA cache
-*.ptx
-*.cubin
-*.fatbin
-
-# Memory dumps
-core
-core.*
-*.dmp
-
-# System and temp files
-*.log
-*.out
-*.err
-*.cache
-*.lock
-*.pid
-*.seed
-
-# macOS specific
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-.AppleDouble
-.LSOverride
-
-# Windows specific
-desktop.ini
-$RECYCLE.BIN/
-*.cab
-*.msi
-*.msix
-*.msm
-*.msp
-
-# Machine Learning specific
+# PyTorch / ML artifacts
+*.pth
+*.pt
+*.pkl
+*.h5
+*.keras
+*.onnx
+*.tflite
 *.model
 *.weights
 *.bin
 *.data-*
 *.index
 *.meta
+*.checkpoint
+*.checkpoint.*
 
-# Audio Processing specific
-*.mfcc
-*.chroma
-*.tonnetz
-*.zero_crossing_rate
-*.spectral_centroid
-*.spectral_bandwidth
-*.spectral_rolloff
-*.tempo
-*.beat
+# Gradio
+.gradio/
+gradio_cache/
+tmp_gradio/
+gradio_files/
+*.gradio
 
-# Configuration and secrets
-*.yaml
-*.yml
-!config/*.yaml
-!config/*.yml
+# Docs build output
+docs/_build/
+site/
+
+# OS / system clutter
+.DS_Store
+.DS_Store?
+._*
+.AppleDouble
+.LSOverride
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# Executables / scripts (platform-specific)
+*.exe
+*.dll
+*.so
+*.dylib
+*.bat
+*.cmd
+*.ps1
+*.sh
+
+# CUDA cache
+*.ptx
+*.cubin
+*.fatbin
+
+# Dumps
+core
+core.*
+*.dmp
+
+# Secrets (allow normal config, block secrets)
 config/secrets.yaml
 config/secrets.yml
-.env
-.env.local
-.env.*.local
+config/secrets.*.yaml
+config/secrets.*.yml
 
-# IDE and Editor specific
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.netrwhist
-.viminfo
-.exrc
+# Numeric / audio processing intermediates
+*.npy
+*.npz
+*.mat
+*.spectrogram
+*.mel
 
-# Backup files
-*.bak
-*.backup
-*.old
-*_backup*
-*_old*
-
-# Debug files
+# Debug / perf
 debug/
 debug_output/
 debug_logs/
 *.debug
 *.trace
-
-# Performance monitoring
 *.prof
 *.profile
 *.stats
 performance/
 benchmark_results/
-
-# Temporary directories
-temp/
-tmp/
-temp_files/
-cache/
-cached/
-*.cache
-*.tmp
