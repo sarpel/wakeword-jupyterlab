@@ -58,10 +58,11 @@ def create_virtual_environment():
     print("\n🏗️ Creating virtual environment...")
 
     # Remove existing environment if it exists
+    import shutil
     if os.path.exists('gradio_venv_gpu'):
         print("🗑️ Removing existing virtual environment...")
-        run_command('rmdir /s /q gradio_venv_gpu', "Removing existing venv")
-
+        shutil.rmtree('gradio_venv_gpu')
+        print("✅ Existing venv removed")
     # Create new environment
     if not run_command('python -m venv gradio_venv_gpu', "Creating virtual environment"):
         return False

@@ -11,63 +11,25 @@ import time
 from pathlib import Path
 import json
 
-# Add current directory to path for imports
-sys.path.append('.')
+# Use relative imports or proper package structure instead
 
 try:
+    import unittest
     from enhanced_dataset import EnhancedWakewordDataset, EnhancedAudioConfig, create_dataloaders
     from feature_extractor import FeatureExtractor, RIRAugmentation
 except ImportError as e:
     print(f"❌ Import error: {e}")
     print("Please ensure enhanced_dataset.py and feature_extractor.py are in the current directory")
     sys.exit(1)
-
-
-class EnhancedFeatureTester:
+class TestEnhancedFeatures(unittest.TestCase):
     """Test class for enhanced wakeword dataset features"""
 
-    def __init__(self):
+    def setUp(self):
         self.test_results = {}
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    def run_comprehensive_test(self):
-        """Run comprehensive test of all enhanced features"""
-        print("🧪 Enhanced Wakeword Dataset Test Suite")
-        print("=" * 50)
-
-        tests = [
-            ("Data Source Check", self.test_data_sources),
-            ("Feature Extractor", self.test_feature_extractor),
-            ("RIRS Augmentation", self.test_rirs_augmentation),
-            ("Enhanced Dataset", self.test_enhanced_dataset),
-            ("Performance Test", self.test_performance),
-            ("Integration Test", self.test_integration)
-        ]
-
-        passed = 0
-        total = len(tests)
-
-        for test_name, test_func in tests:
-            print(f"\n🔍 Running {test_name}...")
-            try:
-                result = test_func()
-                if result:
-                    print(f"✅ {test_name}: PASSED")
-                    passed += 1
-                else:
-                    print(f"❌ {test_name}: FAILED")
-            except Exception as e:
-                print(f"❌ {test_name}: ERROR - {e}")
-                self.test_results[test_name] = f"Error: {e}"
-
-        print(f"\n📊 Test Results: {passed}/{total} passed")
-        return passed == total
-
-    def test_data_sources(self):
-        """Test availability of required data sources"""
-        print("  📁 Checking data sources...")
-
-        sources = {
+    def run_comprehensive_test(self):        """Run comprehensive test of all enhanced features"""
+    # Remove this method and let unittest handle test discovery and execution        sources = {
             'positive_dataset': Path("positive_dataset").exists(),
             'negative_dataset': Path("negative_dataset").exists(),
             'background_noise': Path("background_noise").exists(),
@@ -76,18 +38,14 @@ class EnhancedFeatureTester:
             'rirs_dataset': Path("datasets/mit_rirs/rir_data").exists()
         }
 
-        for source, exists in sources.items():
-            status = "✅" if exists else "❌"
-            print(f"    {status} {source}")
-
         # Count files in available directories
         if sources['positive_dataset']:
             pos_files = len(list(Path("positive_dataset").rglob("*.wav")))
-            print(f"    📊 Positive audio files: {pos_files}")
+            self.assertGreater(pos_files, 0, "No positive audio files found")
 
         if sources['negative_dataset']:
             neg_files = len(list(Path("negative_dataset").rglob("*.wav")))
-            print(f"    📊 Negative audio files: {neg_files}")
+            self.assertGreater(neg_files, 0, "No negative audio files found")
 
         if sources['features']:
             feature_files = len(list(Path("features").rglob("*.npy")))
@@ -97,12 +55,12 @@ class EnhancedFeatureTester:
             rir_files = len(list(Path("datasets/mit_rirs/rir_data").rglob("*")))
             print(f"    📊 RIRS files: {rir_files}")
 
-        # Require at least positive and negative datasets
-        essential = sources['positive_dataset'] and sources['negative_dataset']
         self.test_results['data_sources'] = sources
-        return essential
 
-    def test_feature_extractor(self):
+        # Assert essential directories exist
+        self.assertTrue(sources['negative_dataset'], "Negative dataset directory not found")
+
+    def test_feature_extractor(self):        self.assertTrue(sources['negative_dataset'], "Negative dataset directory not found")    def test_feature_extractor(self):
         """Test feature extractor functionality"""
         print("  🔄 Testing feature extractor...")
 

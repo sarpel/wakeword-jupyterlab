@@ -150,12 +150,14 @@ class RIRSDatasetSetup:
 
     def create_metadata(self, dataset_name: str, dataset_info: Dict):
         """Create metadata file for dataset"""
+        from datetime import datetime
+
         metadata = {
             "dataset_name": dataset_name,
             "description": dataset_info["description"],
             "source_url": dataset_info["url"],
-            "installation_date": str(Path().cwd()),
-            "file_count": len(list(self.rir_data_dir.glob("*.wav")) + list(self.rir_data_dir.glob("*.flac"))),
+            "installation_date": datetime.now().isoformat(),
+            "file_count": len(self.find_audio_files(self.rir_data_dir)),
             "total_size_mb": sum(f.stat().st_size for f in self.rir_data_dir.rglob("*") if f.is_file()) / (1024 * 1024),
             "compatible_with": ["wakeword_training", "speech_enhancement", "voice_activity_detection"]
         }
@@ -165,7 +167,6 @@ class RIRSDatasetSetup:
             json.dump(metadata, f, indent=2)
 
         print(f"Metadata saved to {metadata_file}")
-
     def setup_dataset(self, dataset_name: str) -> bool:
         """Setup a specific RIRS dataset"""
         if dataset_name not in self.RIRS_DATASETS:

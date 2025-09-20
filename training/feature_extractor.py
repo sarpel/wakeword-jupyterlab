@@ -187,11 +187,11 @@ class FeatureExtractor:
             # Return zero features on error
             n_frames = int(self.feature_config.sample_rate * self.feature_config.duration / self.feature_config.hop_length)
             n_features = self.feature_config.n_mels
+            n_features = self.feature_config.n_mels
             if self.feature_config.delta:
-                n_features *= 2
+                n_features += self.feature_config.n_mels  # Delta ekle
             if self.feature_config.delta_delta:
-                n_features *= 3
-
+                n_features += self.feature_config.n_mels  # Delta-delta ekle
             return np.zeros((n_features, n_frames), dtype=np.float32)
 
     def extract_features_batch(self, audio_paths: List[str], feature_type: str = "train") -> List[np.ndarray]:

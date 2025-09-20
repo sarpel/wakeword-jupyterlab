@@ -423,6 +423,21 @@ def create_dataloaders(positive_dir: str,
     """Create train and validation dataloaders"""
 
     # Create datasets
+def create_dataloaders(positive_dir: str,
+                       negative_dir: str,
+                       val_positive_dir: str = None,
+                       val_negative_dir: str = None,
+                       features_dir: str = None,
+                       rirs_dir: str = None,
+                       batch_size: int = 32,
+                       config: EnhancedAudioConfig = None) -> Tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader]:
+    """Create train and validation dataloaders"""
+
+    # Use separate directories for validation if provided
+    val_positive_dir = val_positive_dir or positive_dir.replace('train', 'val')
+    val_negative_dir = val_negative_dir or negative_dir.replace('train', 'val')
+
+    # Create datasets
     train_dataset = EnhancedWakewordDataset(
         positive_dir=positive_dir,
         negative_dir=negative_dir,
@@ -433,14 +448,13 @@ def create_dataloaders(positive_dir: str,
     )
 
     val_dataset = EnhancedWakewordDataset(
-        positive_dir=positive_dir,
-        negative_dir=negative_dir,
+        positive_dir=val_positive_dir,
+        negative_dir=val_negative_dir,
         features_dir=features_dir,
         rirs_dir=rirs_dir,
         config=config,
         mode='validation'
     )
-
     # Create dataloaders
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
