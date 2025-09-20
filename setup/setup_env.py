@@ -87,14 +87,13 @@ def install_packages(pip_exe):
     if not run_command(f'{pip_exe} install --upgrade pip', "Upgrading pip"):
         return False
 
-    # Install PyTorch with CUDA support
-    print("\n🔥 Installing PyTorch with CUDA support...")
-    cmd = f'{pip_exe} install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118'
-    if not run_command(cmd, "Installing PyTorch with CUDA"):
-        print("⚠️ PyTorch installation failed, trying alternative...")
-        # Try with CUDA 11.7
-        cmd = f'{pip_exe} install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu117'
-        if not run_command(cmd, "Installing PyTorch with CUDA 11.7"):
+    # Install PyTorch with CUDA support per policy: prefer 2.1.2 cu118, fallback cu121
+    print("\n🔥 Installing PyTorch (2.1.2) with CUDA 11.8...")
+    cmd = f'{pip_exe} install torch==2.1.2+cu118 torchvision==0.16.2+cu118 torchaudio==2.1.2+cu118 --index-url https://download.pytorch.org/whl/cu118'
+    if not run_command(cmd, "Installing PyTorch 2.1.2 cu118"):
+        print("⚠️ cu118 installation failed, trying CUDA 12.1...")
+        cmd = f'{pip_exe} install torch==2.1.2+cu121 torchvision==0.16.2+cu121 torchaudio==2.1.2+cu121 --index-url https://download.pytorch.org/whl/cu121'
+        if not run_command(cmd, "Installing PyTorch 2.1.2 cu121"):
             return False
 
     # Install other required packages
@@ -148,10 +147,11 @@ def test_installation(python_exe):
 
     return all(results)
 
-def create_launcher():
-    """Remind the user how to start the Gradio application."""
+def create_launcher(python_exe):
+    """Remind the user how to start the Gradio application using the venv."""
     print("\nLauncher script already provided: launch_app.py")
-    print("Use `python launch_app.py` after installing dependencies.")
+    print("Use the virtualenv Python to run the app for correct CUDA build:")
+    print(f"  {python_exe} launch_app.py")
 
 def main():
     print("🎯 Gradio GPU Environment Setup")
@@ -182,7 +182,7 @@ def main():
         return False
 
     # Create launcher
-    create_launcher()
+    create_launcher(python_exe)
 
     print("\n🎉 Setup completed successfully!")
     print("\n📋 Next steps:")

@@ -4,6 +4,11 @@ Enhanced Wakeword Training Gradio Application
 Complete GUI for wakeword detection model training with comprehensive documentation
 """
 
+# IMPORTANT: Disable Torch Dynamo/ONNX paths to avoid ml_dtypes/onnx import issues on Windows
+import os as _early_os
+_early_os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
+_early_os.environ.setdefault("PYTORCH_JIT", "0")
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -132,22 +137,39 @@ class AudioProcessor:
         return log_mel.astype(np.float32)
 
     def augment_audio(self, audio, config=AugmentationConfig):
+        """Lightweight augmentation tuned for speed.
+
+        To avoid very slow first epochs, heavy operations like pitch shift and
+        time-stretch are applied with much lower probability. We prioritize
+        cheap ops (time shift, additive noise). This significantly reduces per
+        sample compute time on CPU/Windows.
+        """
         augmented_audio = audio.copy()
 
-        if random.random() < config.AUGMENTATION_PROB:
+        # Cheap: time shift
+        if random.random() < min(0.6, config.AUGMENTATION_PROB):
             shift_amount = int(random.uniform(-config.TIME_SHIFT_MAX, config.TIME_SHIFT_MAX) * self.config.SAMPLE_RATE)
             augmented_audio = np.roll(augmented_audio, shift_amount)
 
-        if random.random() < config.AUGMENTATION_PROB:
-            n_steps = random.uniform(-config.PITCH_SHIFT_MAX, config.PITCH_SHIFT_MAX)
-            augmented_audio = librosa.effects.pitch_shift(y=augmented_audio, sr=self.config.SAMPLE_RATE, n_steps=n_steps)
+        # Heavy: pitch shift (lower probability for speed)
+        if random.random() < 0.15:  # was ~0.85
+            try:
+                n_steps = random.uniform(-config.PITCH_SHIFT_MAX, config.PITCH_SHIFT_MAX)
+                augmented_audio = librosa.effects.pitch_shift(y=augmented_audio, sr=self.config.SAMPLE_RATE, n_steps=n_steps)
+            except Exception:
+                pass
 
-        if random.random() < config.AUGMENTATION_PROB:
-            speed_factor = random.uniform(config.SPEED_CHANGE_MIN, config.SPEED_CHANGE_MAX)
-            augmented_audio = librosa.effects.time_stretch(y=augmented_audio, rate=speed_factor)
-            augmented_audio = self.pad_or_truncate(augmented_audio, len(audio))
+        # Heavy: time stretch (lower probability for speed)
+        if random.random() < 0.15:  # was ~0.85
+            try:
+                speed_factor = random.uniform(config.SPEED_CHANGE_MIN, config.SPEED_CHANGE_MAX)
+                augmented_audio = librosa.effects.time_stretch(y=augmented_audio, rate=speed_factor)
+                augmented_audio = self.pad_or_truncate(augmented_audio, len(audio))
+            except Exception:
+                pass
 
-        if random.random() < config.AUGMENTATION_PROB:
+        # Cheap: additive noise
+        if random.random() < min(0.7, config.AUGMENTATION_PROB):
             noise = np.random.normal(0, config.NOISE_FACTOR, len(augmented_audio))
             augmented_audio = augmented_audio + noise
 
@@ -231,13 +253,26 @@ class EnhancedWakewordDataset(Dataset):
         self._create_balanced_dataset()
 
     def _cache_background_segments(self, max_cache_size=100):
+        """Cache background segments trimmed to target length for fast mixing.
+
+        Previously we cached full background files which could be very long,
+        increasing memory/IO and slowing mixing. We now normalize and
+        pad/trim to the target training length up-front.
+        """
         cache = []
+        target_length = int(self.processor.config.SAMPLE_RATE * self.processor.config.DURATION)
         for i, bg_file in enumerate(self.background_files[:max_cache_size]):
             try:
                 audio = self.processor.load_audio(bg_file)
                 if audio is not None and len(audio) > 0:
-                    audio = audio / (np.max(np.abs(audio)) + 1e-8)
-                    cache.append(audio)
+                    # Normalize and trim/pad to target length
+                    audio = self.processor.normalize_audio(audio)
+                    audio = self.processor.pad_or_truncate(audio, target_length)
+                    # Final safety scaling
+                    max_abs = np.max(np.abs(audio))
+                    if np.isfinite(max_abs) and max_abs > 1e-8:
+                        audio = (audio / max_abs) * 0.95
+                    cache.append(audio.astype(np.float32, copy=False))
             except Exception:
                 pass
         return cache
@@ -431,6 +466,12 @@ class WakewordTrainer:
             self.val_accuracies.append(val_acc)
 
             self.scheduler.step(val_acc)
+
+            # Console log for headless supervision
+            try:
+                print(f"[Epoch {epoch+1}/{epochs}] Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.2f}% | Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.2f}% | Best Val Acc: {self.best_val_acc:.2f}%")
+            except Exception:
+                pass
 
             if val_acc > self.best_val_acc:
                 self.best_val_acc = val_acc
@@ -734,6 +775,10 @@ class WakewordTrainingApp:
         self.train_loader = None
         self.val_loader = None
         self.test_loader = None
+        # Live batch progress (updated via update_progress callback during training)
+        self._batch_progress = 0.0
+        self._current_batch = 0
+        self._total_batches = 0
 
     def load_data(self, positive_dir, negative_dir, background_dir, batch_size, val_split, test_split):
         try:
@@ -758,6 +803,33 @@ class WakewordTrainingApp:
             negative_train, negative_test = train_test_split(negative_files, test_size=test_split, random_state=42)
             negative_train, negative_val = train_test_split(negative_train, test_size=val_split/(1-test_split), random_state=42)
 
+            # Optional small-caps for smoke tests (via env vars)
+            # DATASET_CAP limits the number of samples per split for wakeword and negative sets
+            # BACKGROUND_CAP limits background file count
+            _cap = os.environ.get('DATASET_CAP')
+            _bg_cap = os.environ.get('BACKGROUND_CAP')
+            if _cap is not None:
+                try:
+                    _cap = int(_cap)
+                    if _cap > 0:
+                        wakeword_train = wakeword_train[:_cap]
+                        wakeword_val = wakeword_val[:max(1, _cap // 5)]
+                        wakeword_test = wakeword_test[:max(1, _cap // 5)]
+
+                        negative_train = negative_train[:_cap * 2]
+                        negative_val = negative_val[:max(1, (_cap * 2) // 5)]
+                        negative_test = negative_test[:max(1, (_cap * 2) // 5)]
+                except Exception:
+                    pass
+
+            if _bg_cap is not None:
+                try:
+                    _bg_cap = int(_bg_cap)
+                    if _bg_cap > 0:
+                        background_files = background_files[:_bg_cap]
+                except Exception:
+                    pass
+
             # Create datasets
             train_dataset = EnhancedWakewordDataset(
                 wakeword_train, negative_train[:len(negative_train)//2],
@@ -776,8 +848,21 @@ class WakewordTrainingApp:
             # Use single-process loading there for stability.
             import os as _os
             _num_workers = 0 if _os.name == 'nt' else 2
-            self.train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=_num_workers)
-            self.val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=_num_workers)
+            # pin_memory can improve host→device transfer; safe on CPU-only as well.
+            self.train_loader = DataLoader(
+                train_dataset,
+                batch_size=batch_size,
+                shuffle=True,
+                num_workers=_num_workers,
+                pin_memory=True,
+            )
+            self.val_loader = DataLoader(
+                val_dataset,
+                batch_size=batch_size,
+                shuffle=False,
+                num_workers=_num_workers,
+                pin_memory=True,
+            )
 
             data_info = f"""
 ✅ Veri Yükleme Başarılı!
@@ -822,8 +907,10 @@ class WakewordTrainingApp:
             return f"Eğitim başlatma hatası: {str(e)}"
 
     def update_progress(self, progress, current_batch, total_batches):
-        # This will be called during training to update UI
-        pass
+        # Called from training thread: store live progress for polling UI
+        self._batch_progress = float(progress)
+        self._current_batch = int(current_batch)
+        self._total_batches = int(total_batches)
 
     def get_training_status(self):
         if not self.trainer.is_training and not self.trainer.training_complete:
@@ -833,7 +920,13 @@ class WakewordTrainingApp:
             return "Eğitim başlatılmadı", fig
 
         if self.trainer.is_training:
-            status = f"Eğitim devam ediyor - Epoch {self.trainer.current_epoch}/{self.trainer.config.EPOCHS}"
+            if self._total_batches > 0:
+                status = (
+                    f"Eğitim devam ediyor - Epoch {self.trainer.current_epoch}/{self.trainer.config.EPOCHS} "
+                    f"| Batch {self._current_batch}/{self._total_batches} (~{self._batch_progress:.1f}%)"
+                )
+            else:
+                status = f"Eğitim devam ediyor - Epoch {self.trainer.current_epoch}/{self.trainer.config.EPOCHS}"
         else:
             status = f"Eğitim tamamlandı - En iyi validation accuracy: {self.trainer.best_val_acc:.2f}%"
 
