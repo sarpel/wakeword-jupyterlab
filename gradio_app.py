@@ -14,6 +14,11 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
+try:
+    from torch.cuda.amp import GradScaler, autocast
+except Exception:
+    GradScaler = None
+    autocast = None
 import numpy as np
 import librosa
 import soundfile as sf
@@ -36,7 +41,17 @@ import time
 import json
 from datetime import datetime
 import markdown
+import contextlib
 warnings.filterwarnings('ignore')
+
+# Enforce CUDA-only training (no CPU fallback allowed)
+if not torch.cuda.is_available():
+    raise RuntimeError("CUDA GPU is required. CPU training is disabled by policy.")
+try:
+    torch.backends.cudnn.benchmark = True
+    torch.set_float32_matmul_precision("high")  # enable TF32 if supported
+except Exception:
+    pass
 
 # Configuration Classes (same as before)
 class AudioConfig:
@@ -399,6 +414,9 @@ class WakewordTrainer:
 
         # Gradient clipping configurable
         self.grad_clip_max_norm = 1.0
+        # Mixed precision (CUDA only)
+        self.use_amp = True
+        self.scaler = GradScaler(enabled=self.use_amp) if GradScaler else None
 
     def pause(self):
         self.paused = True
@@ -459,16 +477,26 @@ class WakewordTrainer:
             if not self.is_training:
                 break
 
-            data, target = data.to(self.device), target.to(self.device).squeeze()
+            data = data.to(self.device, non_blocking=True)
+            target = target.to(self.device, non_blocking=True).squeeze()
 
-            self.optimizer.zero_grad()
-            output = self.model(data)
-            loss = self.criterion(output, target)
+            self.optimizer.zero_grad(set_to_none=True)
+            ctx = autocast(enabled=self.use_amp) if autocast else contextlib.nullcontext()
+            with ctx:
+                output = self.model(data)
+                loss = self.criterion(output, target)
 
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.grad_clip_max_norm)
-
-            loss.backward()
-            self.optimizer.step()
+            if self.scaler is not None:
+                self.scaler.scale(loss).backward()
+                # Unscale before clipping to ensure correct gradient norms
+                self.scaler.unscale_(self.optimizer)
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.grad_clip_max_norm)
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+            else:
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.grad_clip_max_norm)
+                self.optimizer.step()
 
             running_loss += loss.item()
             _, predicted = torch.max(output.data, 1)
@@ -496,9 +524,12 @@ class WakewordTrainer:
                 self._pause_event.wait()
                 if not self.is_training:
                     break
-                data, target = data.to(self.device), target.to(self.device).squeeze()
-                output = self.model(data)
-                loss = self.criterion(output, target)
+                data = data.to(self.device, non_blocking=True)
+                target = target.to(self.device, non_blocking=True).squeeze()
+                ctx = autocast(enabled=self.use_amp) if autocast else contextlib.nullcontext()
+                with ctx:
+                    output = self.model(data)
+                    loss = self.criterion(output, target)
 
                 running_loss += loss.item()
                 _, predicted = torch.max(output.data, 1)
@@ -513,6 +544,9 @@ class WakewordTrainer:
     def train(self, train_loader, val_loader, epochs, progress_callback=None,
               auto_extend=False, extend_step=5, max_extra_epochs=0,
               plateau_delta=0.001, worsen_patience=3):
+        # Hard assert: model and tensors must be on CUDA
+        if not torch.cuda.is_available() or next(self.model.parameters()).device.type != 'cuda':
+            raise RuntimeError("CUDA device check failed: model must be on CUDA and CUDA must be available.")
         self.is_training = True
         self.training_complete = False
         self._pause_event.set()  # ensure running
@@ -870,7 +904,7 @@ training_thread = None
 
 class WakewordTrainingApp:
     def __init__(self):
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.device = torch.device('cuda')
         self.processor = AudioProcessor()
         self.model = WakewordModel().to(self.device)
         self.trainer = WakewordTrainer(self.model, self.device)
@@ -1055,7 +1089,7 @@ class WakewordTrainingApp:
             fig = go.Figure()
             fig.add_annotation(text="Henüz eğitim başlatılmadı", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
             fig.update_layout(height=600, title_text="Training Progress")
-            return "Eğitim başlatılmadı", fig
+            return "Eğitim başlatılmadı", fig, ""
 
         if self.trainer.is_training:
             if self._total_batches > 0:
@@ -1162,15 +1196,18 @@ class WakewordTrainingApp:
             # Test on validation set
             all_preds = []
             all_labels = []
+            all_probs = []  # positive class probabilities
 
             with torch.no_grad():
                 for data, target in self.val_loader:
                     data, target = data.to(self.device), target.to(self.device).squeeze()
-                    output = self.model(data)
-                    _, predicted = torch.max(output, 1)
+                    logits = self.model(data)
+                    probs = torch.softmax(logits, dim=1)[:, 1]
+                    _, predicted = torch.max(logits, 1)
 
-                    all_preds.extend(predicted.cpu().numpy())
-                    all_labels.extend(target.cpu().numpy())
+                    all_preds.extend(predicted.detach().cpu().numpy().tolist())
+                    all_labels.extend(target.detach().cpu().numpy().tolist())
+                    all_probs.extend(probs.detach().cpu().numpy().tolist())
 
             # Calculate metrics
             accuracy = accuracy_score(all_labels, all_preds)
@@ -1181,7 +1218,39 @@ class WakewordTrainingApp:
             # Create confusion matrix
             cm = confusion_matrix(all_labels, all_preds)
 
-            fig = make_subplots(rows=2, cols=2, subplot_titles=('Confusion Matrix', 'Metrics', 'ROC Curve', 'Class Distribution'))
+            # Advanced metrics
+            from sklearn.metrics import roc_curve, auc, precision_recall_curve, average_precision_score, brier_score_loss
+            try:
+                fpr, tpr, roc_th = roc_curve(all_labels, all_probs)
+                roc_auc = auc(fpr, tpr)
+            except Exception:
+                fpr, tpr, roc_auc = [0, 1], [0, 1], float('nan')
+
+            try:
+                pr_prec, pr_rec, pr_th = precision_recall_curve(all_labels, all_probs)
+                ap = average_precision_score(all_labels, all_probs)
+            except Exception:
+                pr_prec, pr_rec, ap = [1, 0], [0, 1], float('nan')
+
+            try:
+                brier = brier_score_loss(all_labels, all_probs)
+            except Exception:
+                brier = float('nan')
+
+            # Best threshold by F1
+            best_thr, best_f1 = 0.5, f1
+            try:
+                ths = pr_th if 'pr_th' in locals() and len(pr_th) > 0 else [0.5]
+                from sklearn.metrics import f1_score as _f1
+                for thr in ths:
+                    preds_thr = [1 if p >= thr else 0 for p in all_probs]
+                    f1_thr = _f1(all_labels, preds_thr)
+                    if f1_thr > best_f1:
+                        best_f1, best_thr = f1_thr, float(thr)
+            except Exception:
+                pass
+
+            fig = make_subplots(rows=2, cols=2, subplot_titles=('Confusion Matrix', 'Metrics', 'ROC Curve', 'Precision-Recall'))
 
             # Confusion Matrix
             fig.add_trace(go.Heatmap(z=cm, colorscale='Blues',
@@ -1194,13 +1263,11 @@ class WakewordTrainingApp:
             values = [accuracy, precision, recall, f1]
             fig.add_trace(go.Bar(x=metrics, y=values, name='Metrics', marker_color='lightblue'), row=1, col=2)
 
-            # ROC Curve approximation
-            fpr, tpr = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0], [0, 0.2, 0.4, 0.6, 0.7, 0.8, 0.85, 0.9, 0.93, 0.96, 1.0]
-            fig.add_trace(go.Scatter(x=fpr, y=tpr, name='ROC Curve', line=dict(color='red')), row=2, col=1)
+            # ROC Curve
+            fig.add_trace(go.Scatter(x=fpr, y=tpr, name=f'ROC (AUC={roc_auc:.3f})', line=dict(color='red')), row=2, col=1)
 
-            # Class Distribution
-            class_counts = [len([l for l in all_labels if l == 0]), len([l for l in all_labels if l == 1])]
-            fig.add_trace(go.Pie(labels=['Negative', 'Wakeword'], values=class_counts, name='Distribution'), row=2, col=2)
+            # Precision-Recall Curve
+            fig.add_trace(go.Scatter(x=pr_rec, y=pr_prec, name=f'PR (AP={ap:.3f})', line=dict(color='green')), row=2, col=2)
 
             fig.update_layout(height=800, showlegend=True, title_text="Model Evaluation Results")
 
@@ -1213,6 +1280,10 @@ class WakewordTrainingApp:
 • Precision: {precision:.4f}
 • Recall: {recall:.4f}
 • F1-Score: {f1:.4f}
+• ROC AUC: {roc_auc:.4f}
+• Average Precision (AP): {ap:.4f}
+• Brier Score: {brier:.4f}
+• En İyi Eşik (F1): {best_thr:.3f} (F1={best_f1:.4f})
 
 📈 Confusion Matrix:
 • True Negative: {cm[0][0]}
