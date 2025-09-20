@@ -14,6 +14,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
+import torchaudio
 try:
     from torch.cuda.amp import GradScaler, autocast
 except Exception:
@@ -31,6 +32,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from tqdm import tqdm
 import warnings
+from collections import OrderedDict
 import gradio as gr
 import pandas as pd
 import plotly.graph_objects as go
@@ -89,6 +91,29 @@ class AugmentationConfig:
 class AudioProcessor:
     def __init__(self, config=AudioConfig):
         self.config = config
+        # Small LRU cache for preprocessed (normalized + padded) audio to reduce disk IO and librosa cost across epochs
+        self._preproc_cache: OrderedDict[str, np.ndarray] = OrderedDict()
+        self._cache_size = 512  # ~512 * 1.7s * 16k * 4B ~= 55MB
+        # torchaudio transforms (CPU) — faster than librosa; keep CPU to avoid returning CUDA tensors in Dataset
+        try:
+            self._ta_mel = torchaudio.transforms.MelSpectrogram(
+                sample_rate=self.config.SAMPLE_RATE,
+                n_fft=self.config.N_FFT,
+                win_length=self.config.WIN_LENGTH,
+                hop_length=self.config.HOP_LENGTH,
+                f_min=self.config.FMIN,
+                f_max=self.config.FMAX,
+                n_mels=self.config.N_MELS,
+                center=True,
+                power=2.0,
+                normalized=False,
+            )
+            self._ta_db = torchaudio.transforms.AmplitudeToDB(stype='power')
+            self.has_torchaudio = True
+        except Exception:
+            self._ta_mel = None
+            self._ta_db = None
+            self.has_torchaudio = False
 
     def load_audio(self, file_path):
         try:
@@ -114,6 +139,31 @@ class AudioProcessor:
             return audio[start_idx:start_idx + target_length]
         else:
             return np.pad(audio, (0, target_length - len(audio)), mode='constant')
+
+    def get_preprocessed_audio(self, file_path):
+        """Load, normalize, and pad/truncate audio with a small LRU cache.
+
+        Caches the base (pre-augmentation) audio to avoid repeated disk IO and heavy decode.
+        """
+        key = file_path
+        if key in self._preproc_cache:
+            # Move to end (recently used)
+            arr = self._preproc_cache.pop(key)
+            self._preproc_cache[key] = arr
+            return arr.copy()
+
+        audio = self.load_audio(file_path)
+        if audio is None:
+            return None
+        audio = self.normalize_audio(audio)
+        target_length = int(self.config.SAMPLE_RATE * self.config.DURATION)
+        audio = self.pad_or_truncate(audio, target_length)
+        # Insert into LRU
+        self._preproc_cache[key] = audio.astype(np.float32, copy=False)
+        if len(self._preproc_cache) > self._cache_size:
+            # Evict oldest
+            self._preproc_cache.popitem(last=False)
+        return audio
 
     def audio_to_mel(self, audio):
         """Convert audio to log-mel with a consistent, deterministic frame width.
@@ -150,6 +200,26 @@ class AudioProcessor:
             log_mel = log_mel[:, :expected_frames]
 
         return log_mel.astype(np.float32)
+
+    def audio_to_mel_ta(self, audio_np: np.ndarray) -> torch.Tensor:
+        """Fast path: torchaudio-based mel + dB on CPU, returns torch tensor (n_mels, frames)."""
+        target_len = int(self.config.SAMPLE_RATE * self.config.DURATION)
+        expected_frames = 1 + int(np.floor(target_len / self.config.HOP_LENGTH))
+        if audio_np is None or len(audio_np) == 0:
+            return torch.zeros(self.config.N_MELS, expected_frames, dtype=torch.float32)
+        x = torch.from_numpy(np.asarray(audio_np, dtype=np.float32))  # (T,)
+        x = x.unsqueeze(0)  # (1, T)
+        mel = self._ta_mel(x)  # (1, n_mels, frames)
+        mel = mel.squeeze(0)
+        mel_db = self._ta_db(mel)
+        # Pad/truncate frames
+        t = mel_db.shape[1]
+        if t < expected_frames:
+            pad = expected_frames - t
+            mel_db = torch.nn.functional.pad(mel_db, (0, pad))
+        elif t > expected_frames:
+            mel_db = mel_db[:, :expected_frames]
+        return mel_db.to(dtype=torch.float32)
 
     def augment_audio(self, audio, config=AugmentationConfig):
         """Lightweight augmentation tuned for speed.
@@ -359,25 +429,24 @@ class EnhancedWakewordDataset(Dataset):
         label = self.labels[idx]
         category = self.categories[idx]
 
-        audio = self.processor.load_audio(file_path)
+        audio = self.processor.get_preprocessed_audio(file_path)
 
         if audio is None:
             mel_spec = np.zeros((self.processor.config.N_MELS, 31), dtype=np.float32)
         else:
-            audio = self.processor.normalize_audio(audio)
-            target_length = int(self.processor.config.SAMPLE_RATE * self.processor.config.DURATION)
-            audio = self.processor.pad_or_truncate(audio, target_length)
-
             if self.augment:
                 audio = self.processor.augment_audio(audio)
 
             if category != 'background' and random.random() < self.background_mix_prob:
                 audio = self._mix_with_background(audio)
 
-            mel_spec = self.processor.audio_to_mel(audio)
-
-        mel_array = np.ascontiguousarray(mel_spec, dtype=np.float32)
-        mel_tensor = torch.from_numpy(mel_array).unsqueeze(0).clone()
+            if getattr(self.processor, 'has_torchaudio', False) and self.processor._ta_mel is not None:
+                mel_t = self.processor.audio_to_mel_ta(audio)
+                mel_tensor = mel_t.unsqueeze(0)  # (1, n_mels, frames)
+            else:
+                mel_spec = self.processor.audio_to_mel(audio)
+                mel_array = np.ascontiguousarray(mel_spec, dtype=np.float32)
+                mel_tensor = torch.from_numpy(mel_array).unsqueeze(0)
         label_tensor = torch.tensor(label, dtype=torch.long)
 
         return mel_tensor, label_tensor
@@ -405,6 +474,7 @@ class WakewordTrainer:
         self.current_epoch = 0
         self.is_training = False
         self.training_complete = False
+        self._last_perf = ""
 
         # Pause/Resume support
         self.paused = False
@@ -471,14 +541,29 @@ class WakewordTrainer:
         correct = 0
         total = 0
 
+        # Performance timing
+        import time as _tm
+        last_end = _tm.perf_counter()
+        sum_data = 0.0
+        sum_h2d = 0.0
+        sum_compute = 0.0
+        seen = 0
+
         for batch_idx, (data, target) in enumerate(train_loader):
             # Handle pause/resume
             self._pause_event.wait()
             if not self.is_training:
                 break
 
+            # Data time (time to receive next batch)
+            t_now = _tm.perf_counter()
+            data_time = t_now - last_end
+
+            # Host→Device transfer
+            t_h2d0 = _tm.perf_counter()
             data = data.to(self.device, non_blocking=True)
             target = target.to(self.device, non_blocking=True).squeeze()
+            t_h2d1 = _tm.perf_counter()
 
             self.optimizer.zero_grad(set_to_none=True)
             ctx = autocast(enabled=self.use_amp) if autocast else contextlib.nullcontext()
@@ -486,6 +571,8 @@ class WakewordTrainer:
                 output = self.model(data)
                 loss = self.criterion(output, target)
 
+            # Compute + backward + step
+            t_comp0 = _tm.perf_counter()
             if self.scaler is not None:
                 self.scaler.scale(loss).backward()
                 # Unscale before clipping to ensure correct gradient norms
@@ -497,15 +584,33 @@ class WakewordTrainer:
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.grad_clip_max_norm)
                 self.optimizer.step()
+            t_comp1 = _tm.perf_counter()
 
             running_loss += loss.item()
             _, predicted = torch.max(output.data, 1)
             total += target.size(0)
             correct += (predicted == target).sum().item()
 
+            # Update perf accumulators
+            sum_data += data_time
+            sum_h2d += (t_h2d1 - t_h2d0)
+            sum_compute += (t_comp1 - t_comp0)
+            seen += 1
+
+            if seen % 20 == 0:
+                avg_data = sum_data / max(seen, 1)
+                avg_h2d = sum_h2d / max(seen, 1)
+                avg_comp = sum_compute / max(seen, 1)
+                self._last_perf = (
+                    f"Avg times (s) — data: {avg_data:.4f}, h2d: {avg_h2d:.4f}, compute: {avg_comp:.4f}; "
+                    f"ratio compute/iter: {avg_comp / max((avg_data+avg_h2d+avg_comp), 1e-9):.2f}"
+                )
+
             if progress_callback and batch_idx % 10 == 0:
                 progress = (batch_idx + 1) / len(train_loader) * 100
                 progress_callback(progress, batch_idx + 1, len(train_loader))
+
+            last_end = _tm.perf_counter()
 
         epoch_loss = running_loss / len(train_loader)
         epoch_acc = 100. * correct / total
@@ -1014,22 +1119,42 @@ class WakewordTrainingApp:
             # On Windows, multi-processing workers can cause storage resize errors with numpy/librosa.
             # Use single-process loading there for stability.
             import os as _os
-            _num_workers = 0 if _os.name == 'nt' else 2
-            # pin_memory can improve host→device transfer; safe on CPU-only as well.
-            self.train_loader = DataLoader(
-                train_dataset,
-                batch_size=batch_size,
-                shuffle=True,
-                num_workers=_num_workers,
-                pin_memory=True,
-            )
-            self.val_loader = DataLoader(
-                val_dataset,
-                batch_size=batch_size,
-                shuffle=False,
-                num_workers=_num_workers,
-                pin_memory=True,
-            )
+            _is_windows = (_os.name == 'nt')
+            # Try a modest number of workers on Windows; fallback to 0 on failure
+            _suggested_workers = max(2, (os.cpu_count() or 4) // 4)
+            _num_workers = _suggested_workers if _is_windows else 2
+            def _make_loader(dataset, shuffle):
+                if _num_workers > 0:
+                    try:
+                        return DataLoader(
+                            dataset,
+                            batch_size=batch_size,
+                            shuffle=shuffle,
+                            num_workers=_num_workers,
+                            pin_memory=True,
+                            persistent_workers=True,
+                            prefetch_factor=2,
+                        )
+                    except Exception:
+                        # Fallback to single-process on any Windows/librosa issues
+                        return DataLoader(
+                            dataset,
+                            batch_size=batch_size,
+                            shuffle=shuffle,
+                            num_workers=0,
+                            pin_memory=True,
+                        )
+                else:
+                    return DataLoader(
+                        dataset,
+                        batch_size=batch_size,
+                        shuffle=shuffle,
+                        num_workers=0,
+                        pin_memory=True,
+                    )
+
+            self.train_loader = _make_loader(train_dataset, shuffle=True)
+            self.val_loader = _make_loader(val_dataset, shuffle=False)
 
             data_info = f"""
 ✅ Veri Yükleme Başarılı!
@@ -1127,7 +1252,8 @@ class WakewordTrainingApp:
                 f"Val Loss: {self.trainer.val_losses[i]:.4f}\n"
                 f"Train Acc: {self.trainer.train_accuracies[i]:.2f}%\n"
                 f"Val Acc: {self.trainer.val_accuracies[i]:.2f}%\n"
-                f"Best Val Acc: {self.trainer.best_val_acc:.2f}%"
+                f"Best Val Acc: {self.trainer.best_val_acc:.2f}%\n"
+                f"{self.trainer._last_perf}"
             )
         return status, fig, self._last_metrics_text
 
