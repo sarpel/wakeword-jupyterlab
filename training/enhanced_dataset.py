@@ -415,33 +415,43 @@ class EnhancedWakewordDataset(Dataset):
 
 
 def create_dataloaders(positive_dir: str,
-                      negative_dir: str,
-                      features_dir: str = None,
-                      rirs_dir: str = None,
-                      batch_size: int = 32,
-                      config: EnhancedAudioConfig = None) -> Tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader]:
-    """Create train and validation dataloaders"""
-
-    # Create datasets
-def create_dataloaders(positive_dir: str,
                        negative_dir: str,
-                       val_positive_dir: str = None,
-                       val_negative_dir: str = None,
+                       val_positive_dir: Optional[str] = None,
+                       val_negative_dir: Optional[str] = None,
                        features_dir: str = None,
                        rirs_dir: str = None,
                        batch_size: int = 32,
-                       config: EnhancedAudioConfig = None) -> Tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader]:
-    """Create train and validation dataloaders"""
+                       config: Optional[EnhancedAudioConfig] = None) -> Tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader]:
+    """Create train and validation dataloaders with sensible fallbacks."""
 
-    # Use separate directories for validation if provided
-    val_positive_dir = val_positive_dir or positive_dir.replace('train', 'val')
-    val_negative_dir = val_negative_dir or negative_dir.replace('train', 'val')
+    config = config or EnhancedAudioConfig()
+    resolved_features_dir = features_dir or config.features_dir
 
-    # Create datasets
+    def _resolve_split_dir(train_dir: str, explicit: Optional[str]) -> str:
+        if explicit:
+            return explicit
+
+        train_path = Path(train_dir)
+        candidates = []
+
+        if 'train' in train_path.name:
+            candidates.append(train_path.with_name(train_path.name.replace('train', 'val')))
+
+        candidates.append(train_path.parent / 'val' / train_path.name)
+
+        for candidate in candidates:
+            if candidate.exists():
+                return str(candidate)
+
+        return train_dir
+
+    val_positive_dir = _resolve_split_dir(positive_dir, val_positive_dir)
+    val_negative_dir = _resolve_split_dir(negative_dir, val_negative_dir)
+
     train_dataset = EnhancedWakewordDataset(
         positive_dir=positive_dir,
         negative_dir=negative_dir,
-        features_dir=features_dir,
+        features_dir=resolved_features_dir,
         rirs_dir=rirs_dir,
         config=config,
         mode='train'
@@ -450,18 +460,18 @@ def create_dataloaders(positive_dir: str,
     val_dataset = EnhancedWakewordDataset(
         positive_dir=val_positive_dir,
         negative_dir=val_negative_dir,
-        features_dir=features_dir,
+        features_dir=resolved_features_dir,
         rirs_dir=rirs_dir,
         config=config,
         mode='validation'
     )
-    # Create dataloaders
+
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=4,
-        pin_memory=True,
+        num_workers=0,
+        pin_memory=torch.cuda.is_available(),
         drop_last=False
     )
 
@@ -469,8 +479,8 @@ def create_dataloaders(positive_dir: str,
         val_dataset,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=2,
-        pin_memory=True,
+        num_workers=0,
+        pin_memory=torch.cuda.is_available(),
         drop_last=False
     )
 
