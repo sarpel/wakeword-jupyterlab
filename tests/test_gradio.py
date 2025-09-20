@@ -71,7 +71,7 @@ def create_simple_interface():
         gr.Markdown("""
         If CUDA is working properly, you can run the full Gradio app:
         ```bash
-        python wakeword_training_gradio.py
+        python gradio_app.py
         ```
         """)
 

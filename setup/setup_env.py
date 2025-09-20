@@ -9,6 +9,9 @@ import sys
 import os
 import time
 
+VENV_DIR = 'venv'
+LEGACY_VENV_DIR = 'gradio_venv_gpu'
+
 def run_command(cmd, description=""):
     """Run a command and return success status"""
     print(f"\n🔄 {description}")
@@ -57,23 +60,22 @@ def create_virtual_environment():
     """Create and set up virtual environment"""
     print("\n🏗️ Creating virtual environment...")
 
-    # Remove existing environment if it exists
     import shutil
-    if os.path.exists('gradio_venv_gpu'):
-        print("🗑️ Removing existing virtual environment...")
-        shutil.rmtree('gradio_venv_gpu')
-        print("✅ Existing venv removed")
-    # Create new environment
-    if not run_command('python -m venv gradio_venv_gpu', "Creating virtual environment"):
+    for candidate in (VENV_DIR, LEGACY_VENV_DIR):
+        if os.path.exists(candidate):
+            print(f"🗑️ Removing existing virtual environment: {candidate}")
+            shutil.rmtree(candidate)
+            print("✅ Existing venv removed")
+
+    if not run_command(f'python -m venv {VENV_DIR}', "Creating virtual environment"):
         return False
 
-    # Get the python executable path
     if os.name == 'nt':  # Windows
-        python_exe = 'gradio_venv_gpu\\Scripts\\python.exe'
-        pip_exe = 'gradio_venv_gpu\\Scripts\\pip.exe'
+        python_exe = os.path.join(VENV_DIR, 'Scripts', 'python.exe')
+        pip_exe = os.path.join(VENV_DIR, 'Scripts', 'pip.exe')
     else:  # Linux/Mac
-        python_exe = 'gradio_venv_gpu/bin/python'
-        pip_exe = 'gradio_venv_gpu/bin/pip'
+        python_exe = os.path.join(VENV_DIR, 'bin', 'python')
+        pip_exe = os.path.join(VENV_DIR, 'bin', 'pip')
 
     return python_exe, pip_exe
 
@@ -147,59 +149,9 @@ def test_installation(python_exe):
     return all(results)
 
 def create_launcher():
-    """Create a launcher script for the Gradio app"""
-    print("\n🚀 Creating launcher script...")
-
-    launcher_content = '''#!/usr/bin/env python3
-"""
-Gradio Application Launcher for GPU Environment
-"""
-
-import subprocess
-import sys
-import os
-
-def activate_and_run():
-    """Activate virtual environment and run Gradio app"""
-
-    # Get the script directory
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-
-    # Determine the activation command based on OS
-    if os.name == 'nt':  # Windows
-        activate_cmd = 'gradio_venv_gpu\\Scripts\\activate'
-        python_exe = 'gradio_venv_gpu\\Scripts\\python.exe'
-    else:  # Linux/Mac
-        activate_cmd = 'source gradio_venv_gpu/bin/activate'
-        python_exe = 'gradio_venv_gpu/bin/python'
-
-    # Change to script directory
-    os.chdir(script_dir)
-
-    # Run the Gradio app
-    app_path = os.path.join(script_dir, 'wakeword_training_gradio.py')
-
-    print("🚀 Starting Wakeword Training Gradio Application...")
-    print("📍 App location:", app_path)
-    print("🌐 The application will open in your web browser")
-    print("⏹️ Press Ctrl+C to stop the application")
-    print("=" * 60)
-
-    try:
-        subprocess.run([python_exe, app_path])
-    except KeyboardInterrupt:
-        print("\\n👋 Application stopped by user")
-    except Exception as e:
-        print(f"❌ Error running application: {e}")
-
-if __name__ == "__main__":
-    activate_and_run()
-'''
-
-    with open('launch_gradio_gpu.py', 'w') as f:
-        f.write(launcher_content)
-
-    print("✅ Launcher script created: launch_gradio_gpu.py")
+    """Remind the user how to start the Gradio application."""
+    print("\nLauncher script already provided: launch_app.py")
+    print("Use `python launch_app.py` after installing dependencies.")
 
 def main():
     print("🎯 Gradio GPU Environment Setup")
@@ -234,11 +186,11 @@ def main():
 
     print("\n🎉 Setup completed successfully!")
     print("\n📋 Next steps:")
-    print("1. Run the application: python launch_gradio_gpu.py")
+    print("1. Run the application: python launch_app.py")
     print("2. Open your web browser to the shown URL")
     print("3. Configure your data paths and start training")
-    print("\n🔧 Environment location: gradio_venv_gpu/")
-    print("🚀 Launcher script: launch_gradio_gpu.py")
+    print("\n🔧 Environment location: venv/")
+    print("?? Launcher script: launch_app.py")
 
     return True
 

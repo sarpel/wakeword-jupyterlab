@@ -8,8 +8,7 @@ Clean and organized wakeword training system with CUDA/GPU support and comprehen
 ```
 wakeword-jupyterlab/
 ├── gradio_app.py          # Main Gradio web application
-├── gradio_app_old.py      # Backup of original app
-├── launch_app.py          # Simple launcher script
+├── launch_app.py          # Launcher script for the Gradio UI
 ├── requirements.txt       # Python dependencies
 ├── wakeword_training.ipynb # Jupyter notebook training
 ├── venv/                  # Virtual environment (renamed from gradio_venv_gpu)
@@ -74,6 +73,11 @@ wakeword-jupyterlab/
 ## 🎮 Usage
 
 ### Start the application:
+```bash
+python launch_app.py
+```
+
+Or run it directly:
 ```bash
 ./venv/Scripts/python gradio_app.py
 ```

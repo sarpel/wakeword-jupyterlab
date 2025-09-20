@@ -1,93 +1,79 @@
 #!/usr/bin/env python3
-"""
-Gradio Application Launcher
-"""
+"""Launcher utilities for the wakeword Gradio interface."""
 
 import subprocess
 import sys
-import os
+from pathlib import Path
 
-def install_requirements():
-    """Install required packages for Gradio app"""
-    print("📦 Installing required packages...")
+REPO_ROOT = Path(__file__).resolve().parent
+APP_PATH = REPO_ROOT / "gradio_app.py"
+REQUIREMENTS_PATH = REPO_ROOT / "requirements.txt"
+
+
+def install_requirements() -> bool:
+    """Install the application's Python dependencies."""
+    print("Installing required packages...")
 
     try:
-        # Install from requirements file
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements_gradio.txt"])
-        print("✅ All packages installed successfully!")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", str(REQUIREMENTS_PATH)])
+        print("Dependencies are up to date.")
         return True
-    except subprocess.CalledProcessError as e:
-        print(f"❌ Error installing packages: {e}")
+    except subprocess.CalledProcessError as exc:
+        print(f"Failed to install packages: {exc}")
         return False
 
-def check_environment():
-    """Check if the environment is properly set up"""
-    print("🔍 Checking environment...")
+
+def check_environment() -> bool:
+    """Smoke-test core dependencies so the user sees actionable feedback."""
+    print("Checking Python environment...")
 
     try:
-        import torch
-        print(f"✅ PyTorch version: {torch.__version__}")
-        print(f"✅ CUDA available: {torch.cuda.is_available()}")
-
-        if torch.cuda.is_available():
-            print(f"✅ GPU device: {torch.cuda.get_device_name(0)}")
-            print(f"✅ GPU memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
-
-        # Check Gradio
-        import gradio as gr
-        print(f"✅ Gradio version: {gr.__version__}")
-
-        # Check other required packages
-        import librosa, soundfile, numpy, sklearn, matplotlib, plotly
-        print("✅ All required packages are available")
-
+        import torch  # noqa: F401
+        import gradio  # noqa: F401
+        import librosa  # noqa: F401
+        import soundfile  # noqa: F401
+        import numpy  # noqa: F401
+        import sklearn  # noqa: F401
+        import matplotlib  # noqa: F401
+        import plotly  # noqa: F401
+        print("Core packages are importable.")
         return True
-
-    except ImportError as e:
-        print(f"❌ Missing package: {e}")
+    except ImportError as exc:
+        print(f"Missing package: {exc}")
         return False
 
-def launch_app():
-    """Launch the Gradio application"""
-    print("🚀 Launching Wakeword Training Gradio Application...")
 
+def launch_app() -> None:
+    """Run the main Gradio application."""
+    if not APP_PATH.exists():
+        print(f"Could not find {APP_PATH.name}.")
+        sys.exit(1)
+
+    print("Launching wakeword training UI...")
     try:
-        # Change to the directory containing the app
-        os.chdir(os.path.dirname(os.path.abspath(__file__)))
-
-        # Launch the app
-        subprocess.run([sys.executable, "wakeword_training_gradio.py"])
-
+        subprocess.run([sys.executable, str(APP_PATH)], check=False)
     except KeyboardInterrupt:
-        print("\n👋 Application stopped by user")
-    except Exception as e:
-        print(f"❌ Error launching application: {e}")
+        print("\nApplication stopped by user")
 
-def main():
-    print("🎯 Wakeword Training Gradio Application Launcher")
-    print("=" * 50)
 
-    # Check environment
+def main() -> None:
+    print("Wakeword Training Gradio Launcher")
+    print("=" * 38)
+
     if not check_environment():
-        print("\n⚠️  Environment check failed!")
-        print("Please install required packages:")
-        print("pip install -r requirements_gradio.txt")
-        return
+        print("\nRun `pip install -r requirements.txt` and try again.")
+        choice = input("Install or refresh dependencies now? (y/N): ").strip().lower()
+        if choice == "y" and not install_requirements():
+            sys.exit(1)
+    else:
+        choice = input("Install or refresh dependencies anyway? (y/N): ").strip().lower()
+        if choice == "y" and not install_requirements():
+            sys.exit(1)
 
-    # Ask user if they want to install requirements
-    install_choice = input("\n📦 Do you want to install/update required packages? (y/N): ").lower().strip()
-
-    if install_choice == 'y':
-        if not install_requirements():
-            print("❌ Failed to install packages. Please install manually:")
-            print("pip install -r requirements_gradio.txt")
-            return
-
-    print("\n🚀 Starting application...")
-    print("The application will open in your default web browser.")
-    print("Press Ctrl+C to stop the application.")
-
+    print("\nOpen the browser tab Gradio prints to begin training.")
     launch_app()
+
 
 if __name__ == "__main__":
     main()
+
