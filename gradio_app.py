@@ -96,12 +96,22 @@ class AudioProcessor:
             return np.pad(audio, (0, target_length - len(audio)), mode='constant')
 
     def audio_to_mel(self, audio):
+        """Convert audio to log-mel with a consistent, deterministic frame width.
+
+        With librosa's default center=True, the number of frames is:
+            1 + floor(L / hop_length)
+        where L is the target sample length after pad/trim.
+        We compute this expected width and pad/truncate mel features to match.
+        """
+        target_len = int(self.config.SAMPLE_RATE * self.config.DURATION)
+        expected_frames = 1 + int(np.floor(target_len / self.config.HOP_LENGTH))
+
         if len(audio) == 0:
-            return np.zeros((self.config.N_MELS, 31))
+            return np.zeros((self.config.N_MELS, expected_frames), dtype=np.float32)
 
         audio = np.nan_to_num(audio, nan=0.0, posinf=0.0, neginf=0.0)
         if np.max(np.abs(audio)) < 1e-8:
-            return np.zeros((self.config.N_MELS, 31))
+            return np.zeros((self.config.N_MELS, expected_frames), dtype=np.float32)
 
         mel_spec = librosa.feature.melspectrogram(
             y=audio, sr=self.config.SAMPLE_RATE, n_mels=self.config.N_MELS,
@@ -109,7 +119,17 @@ class AudioProcessor:
             win_length=self.config.WIN_LENGTH, fmin=self.config.FMIN, fmax=self.config.FMAX
         )
 
-        return librosa.power_to_db(mel_spec, ref=np.max)
+        log_mel = librosa.power_to_db(mel_spec, ref=np.max)
+
+        # Ensure consistent time dimension
+        t = log_mel.shape[1]
+        if t < expected_frames:
+            pad = expected_frames - t
+            log_mel = np.pad(log_mel, ((0,0),(0,pad)), mode='constant')
+        elif t > expected_frames:
+            log_mel = log_mel[:, :expected_frames]
+
+        return log_mel.astype(np.float32)
 
     def augment_audio(self, audio, config=AugmentationConfig):
         augmented_audio = audio.copy()
