@@ -1024,6 +1024,63 @@ class WakewordTrainingApp:
         # Live metrics text
         self._last_metrics_text = ""
 
+        # Keep last data load parameters to allow rebuilding loaders if needed
+        self._last_data_params = None  # tuple: (positive_dir, negative_dir, background_dir, batch_size, val_split, test_split, bg_mix_prob, snr_min, snr_max)
+
+    # --- Config application helpers ---
+    def apply_audio_config(self, sample_rate: int, duration: float, n_mels: int):
+        """Apply audio config to global config and rebuild processor.
+
+        This keeps defaults unless overridden by UI, and refreshes internal
+        torchaudio transforms and caches for new shapes.
+        """
+        # Update global audio configuration
+        try:
+            AudioConfig.SAMPLE_RATE = int(sample_rate)
+            AudioConfig.DURATION = float(duration)
+            AudioConfig.N_MELS = int(n_mels)
+        except Exception:
+            pass
+
+        # Re-create processor to pick up new settings and clear caches
+        self.processor = AudioProcessor(config=AudioConfig)
+
+    def apply_augmentation_config(self, aug_prob: float, noise_factor: float, time_shift_s: float, pitch_shift_semitones: float):
+        """Apply augmentation hyperparameters to the shared AugmentationConfig.
+
+        EnhancedWakewordDataset uses AudioProcessor.augment_audio which reads
+        AugmentationConfig defaults; updating these reflects on next dataset processing.
+        """
+        try:
+            AugmentationConfig.AUGMENTATION_PROB = float(aug_prob)
+            AugmentationConfig.NOISE_FACTOR = float(noise_factor)
+            AugmentationConfig.TIME_SHIFT_MAX = float(time_shift_s)
+            AugmentationConfig.PITCH_SHIFT_MAX = float(pitch_shift_semitones)
+        except Exception:
+            pass
+
+    def rebuild_model(self, hidden_size: int, num_layers: int, dropout: float):
+        """Rebuild the model and trainer with the selected architecture.
+
+        Must be called before (re)starting training when model settings change.
+        """
+        try:
+            ModelConfig.HIDDEN_SIZE = int(hidden_size)
+            ModelConfig.NUM_LAYERS = int(num_layers)
+            ModelConfig.DROPOUT = float(dropout)
+        except Exception:
+            pass
+
+        # Build a fresh model that derives mel dims from current AudioConfig
+        self.model = WakewordModel(config=ModelConfig, audio_config=AudioConfig).to(self.device)
+        # Recreate trainer with same device
+        self.trainer = WakewordTrainer(self.model, self.device)
+        # Ensure dropout reflects UI
+        try:
+            self.model.dropout.p = float(dropout)
+        except Exception:
+            pass
+
     # Control methods
     def pause_training(self):
         if self.trainer and self.trainer.is_training:
@@ -1052,7 +1109,8 @@ class WakewordTrainingApp:
         except Exception as e:
             return f"Devam edilemedi: {e}"
 
-    def load_data(self, positive_dir, negative_dir, background_dir, batch_size, val_split, test_split):
+    def load_data(self, positive_dir, negative_dir, background_dir, batch_size, val_split, test_split,
+                  background_mix_prob: float = 0.7, snr_min: float = 0.0, snr_max: float = 20.0):
         try:
             # Load audio files
             def load_audio_files(directory, extensions=['*.wav', '*.mp3', '*.flac']):
@@ -1106,13 +1164,17 @@ class WakewordTrainingApp:
             train_dataset = EnhancedWakewordDataset(
                 wakeword_train, negative_train[:len(negative_train)//2],
                 negative_train[len(negative_train)//2:], background_files,
-                self.processor, augment=True
+                self.processor, augment=True,
+                background_mix_prob=float(background_mix_prob),
+                snr_range=(float(snr_min), float(snr_max))
             )
 
             val_dataset = EnhancedWakewordDataset(
                 wakeword_val, negative_val[:len(negative_val)//2],
                 negative_val[len(negative_val)//2:], background_files[:50],
-                self.processor, augment=False
+                self.processor, augment=False,
+                background_mix_prob=float(background_mix_prob) * 0.5,  # lighter mixing on val
+                snr_range=(max(float(snr_min), 5.0), min(float(snr_max), 15.0))
             )
 
             # Create dataloaders
@@ -1156,6 +1218,12 @@ class WakewordTrainingApp:
             self.train_loader = _make_loader(train_dataset, shuffle=True)
             self.val_loader = _make_loader(val_dataset, shuffle=False)
 
+            # Remember last data params for potential rebuilds
+            self._last_data_params = (
+                positive_dir, negative_dir, background_dir, int(batch_size), float(val_split), float(test_split),
+                float(background_mix_prob), float(snr_min), float(snr_max)
+            )
+
             data_info = f"""
 ✅ Veri Yükleme Başarılı!
 
@@ -1178,13 +1246,17 @@ class WakewordTrainingApp:
         except Exception as e:
             return f"Veri yükleme hatası: {str(e)}", None, None
 
-    def start_training(self, epochs, lr, batch_size, dropout):
+    def start_training(self, epochs, lr, batch_size, dropout, hidden_size=None, num_layers=None):
         try:
             # Update trainer config
             self.trainer.config.LEARNING_RATE = lr
             self.trainer.config.BATCH_SIZE = batch_size
             self.trainer.config.EPOCHS = epochs
             self.model.dropout.p = dropout
+
+            # If model architecture sliders are provided, rebuild model/trainer
+            if hidden_size is not None and num_layers is not None:
+                self.rebuild_model(int(hidden_size), int(num_layers), float(dropout))
 
             def training_thread():
                 # Enable auto-extend: add up to +20 epochs in steps of 5 if improving
@@ -1477,7 +1549,7 @@ def create_enhanced_interface():
 
                         gr.Markdown("### 📊 Data Split")
                         val_split = gr.Slider(label="Validation Split", minimum=0.1, maximum=0.3, value=0.2, step=0.05)
-                        test_split = gr.Slider(label="Test Split", minimum=0.1, maximum=0.3, value=0.1, step=0.05)
+                        test_split = gr.Slider(label="Test Split", minimum=0.05, maximum=0.3, value=0.1, step=0.05)
                         batch_size = gr.Slider(label="Batch Size", minimum=8, maximum=64, value=32, step=8)
 
                         load_data_btn = gr.Button("📥 Load Data", variant="primary")
@@ -1485,7 +1557,7 @@ def create_enhanced_interface():
 
                     with gr.Column(scale=1):
                         gr.Markdown("### 🧠 Model Configuration")
-                        hidden_size = gr.Slider(label="Hidden Size", minimum=128, maximum=512, value=256, step=64)
+                        hidden_size = gr.Slider(label="Hidden Size", minimum=128, maximum=1024, value=256, step=64)
                         num_layers = gr.Slider(label="LSTM Layers", minimum=1, maximum=4, value=2, step=1)
                         dropout = gr.Slider(label="Dropout", minimum=0.0, maximum=0.8, value=0.6, step=0.1)
 
@@ -1514,8 +1586,8 @@ def create_enhanced_interface():
                         snr_max = gr.Slider(label="SNR Max (dB)", minimum=0, maximum=30, value=20, step=5)
 
                         gr.Markdown("### 🛡️ Training Safety")
-                        patience = gr.Slider(label="Early Stopping Patience", minimum=5, maximum=20, value=10, step=1)
-                        gradient_clip = gr.Slider(label="Gradient Clip Norm", minimum=0.5, maximum=2.0, value=1.0, step=0.1)
+                        patience = gr.Slider(label="Early Stopping Patience", minimum=3, maximum=30, value=10, step=1)
+                        gradient_clip = gr.Slider(label="Gradient Clip Norm", minimum=0.1, maximum=5.0, value=1.0, step=0.1)
 
             # Tab 2: Training
             with gr.TabItem("🚀 Training"):
@@ -1649,11 +1721,36 @@ def create_enhanced_interface():
                         guide_content = gr.HTML(guide_html)
 
         # Event handlers
-        def load_data_handler(positive_dir, negative_dir, background_dir, batch_size, val_split, test_split):
-            return app.load_data(positive_dir, negative_dir, background_dir, batch_size, val_split, test_split)
+        def load_data_handler(positive_dir, negative_dir, background_dir, batch_size, val_split, test_split,
+                              sample_rate, duration, n_mels,
+                              aug_prob, noise_factor, time_shift, pitch_shift,
+                              bg_mix_prob, snr_min, snr_max,
+                              hidden_size, num_layers, dropout,
+                              patience, gradient_clip):
+            # Apply audio/model/augmentation configs immediately
+            app.apply_audio_config(int(sample_rate), float(duration), int(n_mels))
+            app.apply_augmentation_config(float(aug_prob), float(noise_factor), float(time_shift), float(pitch_shift))
+            app.rebuild_model(int(hidden_size), int(num_layers), float(dropout))
+            # Update trainer safety knobs
+            app.trainer.patience = int(patience)
+            app.trainer.grad_clip_max_norm = float(gradient_clip)
+            # Load data using background mixing and SNR range
+            return app.load_data(
+                positive_dir, negative_dir, background_dir,
+                batch_size, val_split, test_split,
+                background_mix_prob=bg_mix_prob, snr_min=snr_min, snr_max=snr_max
+            )
 
-        def start_training_handler(epochs, lr, batch_size, dropout):
-            return app.start_training(int(epochs), float(lr), int(batch_size), float(dropout))
+        def start_training_handler(epochs, lr, batch_size, dropout,
+                                   sample_rate, duration, n_mels,
+                                   hidden_size, num_layers,
+                                   patience, gradient_clip):
+            # Ensure latest audio/model and safety settings are applied
+            app.apply_audio_config(int(sample_rate), float(duration), int(n_mels))
+            app.rebuild_model(int(hidden_size), int(num_layers), float(dropout))
+            app.trainer.patience = int(patience)
+            app.trainer.grad_clip_max_norm = float(gradient_clip)
+            return app.start_training(int(epochs), float(lr), int(batch_size), float(dropout), hidden_size=int(hidden_size), num_layers=int(num_layers))
 
         def update_training_plots():
             return app.get_training_status()
@@ -1678,13 +1775,20 @@ def create_enhanced_interface():
         # Connect events
         load_data_btn.click(
             load_data_handler,
-            inputs=[positive_dir, negative_dir, background_dir, batch_size, val_split, test_split],
+            inputs=[
+                positive_dir, negative_dir, background_dir, batch_size, val_split, test_split,
+                sample_rate, duration, n_mels,
+                aug_prob, noise_factor, time_shift, pitch_shift,
+                bg_mix_prob, snr_min, snr_max,
+                hidden_size, num_layers, dropout,
+                patience, gradient_clip
+            ],
             outputs=[data_status]
         )
 
         start_btn.click(
             start_training_handler,
-            inputs=[epochs, lr, batch_size, dropout],
+            inputs=[epochs, lr, batch_size, dropout, sample_rate, duration, n_mels, hidden_size, num_layers, patience, gradient_clip],
             outputs=[training_status]
         )
 
@@ -1730,11 +1834,12 @@ def create_enhanced_interface():
         )
 
         # Update learning rate when dropdown changes
-        learning_rate.change(
-            lambda x: gr.Number(value=float(x)),
-            inputs=[learning_rate],
-            outputs=[lr]
-        )
+        def _sync_lr(x):
+            try:
+                return float(x)
+            except Exception:
+                return 0.0001
+        learning_rate.change(_sync_lr, inputs=learning_rate, outputs=lr)
 
     return demo
 
