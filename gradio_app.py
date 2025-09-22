@@ -78,6 +78,7 @@ class TrainingConfig:
     EPOCHS = 100
     VALIDATION_SPLIT = 0.2
     TEST_SPLIT = 0.1
+    WEIGHT_DECAY = 0.00001
 
 class AugmentationConfig:
     AUGMENTATION_PROB = 0.6
@@ -460,7 +461,7 @@ class WakewordTrainer:
 
         class_weights = torch.tensor([1.0, 2.5]).to(device)  # [negative, wakeword]
         self.criterion = nn.CrossEntropyLoss(weight=class_weights).to(device)
-        self.optimizer = optim.Adam(model.parameters(), lr=config.LEARNING_RATE, weight_decay=1e-5)
+        self.optimizer = optim.Adam(model.parameters(), lr=config.LEARNING_RATE, weight_decay=config.WEIGHT_DECAY)
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='max', factor=0.5, patience=5)
 
         self.train_losses = []
@@ -1564,52 +1565,89 @@ def create_enhanced_interface():
             with gr.TabItem("⚙️ Configuration"):
                 with gr.Row():
                     with gr.Column(scale=1):
-                        gr.Markdown("### 📁 Data Configuration")
+                        gr.Markdown("### � Audio Configuration")
+                        sample_rate = gr.Dropdown(label="Sample Rate ⚠️", choices=["8000", "16000", "22050", "44100"], value="16000", info="Ses örnekleme hızı. İnsan sesi için 16000Hz optimum, daha yüksek değerler gereksiz hesaplama yükü yaratır")
+                        duration = gr.Slider(label="Audio Duration (s) ⚠️", minimum=0.5, maximum=3.0, value=1.7, step=0.1, info="Ses dosyasının işlenecek süresi. Wakeword'ü tam kapsamalı ama çok uzun olmamalı")
+                        n_mels = gr.Slider(label="Mel Bands ⚠️", minimum=40, maximum=128, value=80, step=8, info="Mel frekans bandı sayısı. Daha fazla band daha iyi frekans çözünürlüğü sağlar")
+                        n_fft = gr.Slider(label="FFT Window Size ⚠️", minimum=512, maximum=4096, value=2048, step=256, info="FFT pencere boyutu. Frekans çözünürlüğü ile zaman çözünürlüğü arasındaki denge")
+                        hop_length = gr.Slider(label="Hop Length ⚠️", minimum=128, maximum=1024, value=512, step=64, info="Pencereler arası adım sayısı. Küçük değerler daha iyi zaman çözünürlüğü")
+                        win_length = gr.Slider(label="Window Length ⚠️", minimum=512, maximum=4096, value=2048, step=256, info="Spektrogram pencere uzunluğu. FFT boyutu ile aynı olmalı")
+                        fmin = gr.Slider(label="Min Frequency (Hz) ⚠️", minimum=0, maximum=500, value=0, step=20, info="Minimum frekans. Genellikle 0, insan dışı sesler için artırılabilir")
+                        fmax = gr.Slider(label="Max Frequency (Hz) ⚠️", minimum=4000, maximum=22050, value=8000, step=500, info="Maksimum frekans. İnsan sesi için 8000Hz yeterli")
+
+                        gr.Markdown("### 🧠 Model Configuration")
+                        hidden_size = gr.Slider(label="Hidden Size ⚠️", minimum=128, maximum=1024, value=256, step=64, info="LSTM gizli katman boyutu. Daha büyük değerler daha karmaşık paternleri öğrenebilir")
+                        num_layers = gr.Slider(label="LSTM Layers ⚠️", minimum=1, maximum=4, value=2, step=1, info="LSTM katman sayısı. 2 katman genellikle optimum, fazla katman overfitting riski")
+                        dropout = gr.Slider(label="Dropout ⚠️", minimum=0.0, maximum=0.8, value=0.6, step=0.1, info="Overfitting önleme oranı. Eğitim sırasında rastgele nöronları devre dışı bırakır")
+
+                        gr.Markdown("### 🔧 Advanced Model Settings")
+                        grad_clip_max_norm = gr.Slider(label="Gradient Clip Norm ⚠️", minimum=0.1, maximum=5.0, value=1.0, step=0.1, info="Gradient clipping maksimum norm değeri. Exploding gradient'leri önler")
+                        weight_decay = gr.Slider(label="Weight Decay ⚠️", minimum=0.0, maximum=0.001, value=0.00001, step=0.000001, info="L2 regularization ağırlığı. Overfitting'i önlemek için kullanılır")
+                        use_amp = gr.Checkbox(label="Use Mixed Precision ⚠️", value=True, info="Mixed precision training kullan. GPU belleği tasarrufu ve hız artışı sağlar")
+
+                        gr.Markdown("### 💾 Cache Settings")
+                        feature_cache_size = gr.Slider(label="Feature Cache Size ⚠️", minimum=100, maximum=2000, value=512, step=50, info="Özellik önbellek boyutu. Daha büyük değerler daha az disk IO sağlar")
+                        audio_cache_size = gr.Slider(label="Audio Cache Size ⚠️", minimum=50, maximum=1000, value=512, step=50, info="Ses önbellek boyutu. İşlenmiş ses dosyalarını bellekte tutar")
+
+                        gr.Markdown("### 🛡️ Training Safety")
+                        patience = gr.Slider(label="Early Stopping Patience ⚠️", minimum=3, maximum=30, value=10, step=1, info="Early stopping sabrı. Bu kadar epoch iyileşme olmazsa durur")
+
+                    with gr.Column(scale=1):
+                        gr.Markdown("### 🎯 Training Configuration")
+                        epochs = gr.Slider(label="Epochs ⚠️", minimum=10, maximum=200, value=100, step=10, info="Maksimum eğitim dönemi sayısı. Early stopping ile erken bitebilir")
+                        learning_rate = gr.Dropdown(label="Learning Rate ⚠️", choices=["0.001", "0.0005", "0.0001", "0.00005"], value="0.0001", info="Öğrenme hızı. Çok yüksek overfitting, çok düşük yavaş öğrenme")
+                        lr = gr.Number(label="Custom Learning Rate ⚠️", value=0.0001, precision=5, info="Özel öğrenme hızı değeri. Dropdown ile senkronize olur")
+
+                        gr.Markdown("### � Data Configuration")
+                        val_split = gr.Slider(label="Validation Split ⚠️", minimum=0.1, maximum=0.3, value=0.2, step=0.05, info="Validation için ayrılan veri oranı. Model performansını değerlendirmek için kullanılır")
+                        test_split = gr.Slider(label="Test Split ⚠️", minimum=0.05, maximum=0.3, value=0.1, step=0.05, info="Test için ayrılan veri oranı. Final model değerlendirmesi için kullanılır")
+                        batch_size = gr.Slider(label="Batch Size ⚠️", minimum=8, maximum=64, value=32, step=8, info="Eğitim batch boyutu. GPU belleğine sığacak kadar büyük olmalı")
+
+                        gr.Markdown("### 📈 Data Augmentation")
+                        aug_prob = gr.Slider(label="Augmentation Probability ⚠️", minimum=0.0, maximum=1.0, value=0.85, step=0.05, info="Veri artırma uygulanma olasılığı. Eğitim çeşitliliği için yüksek olmalı")
+                        noise_factor = gr.Slider(label="Noise Factor ⚠️", minimum=0.0, maximum=0.5, value=0.15, step=0.05, info="Eklenen gürültü miktarı. Çok yüksek değerler sesi bozar")
+                        time_shift = gr.Slider(label="Time Shift (s) ⚠️", minimum=0.0, maximum=0.5, value=0.3, step=0.05, info="Zaman kaydırma maksimum değeri. Farklı zamanlamalar için")
+                        pitch_shift = gr.Slider(label="Pitch Shift (semitones) ⚠️", minimum=0.0, maximum=3.0, value=1.5, step=0.5, info="Perde değiştirme aralığı. İnsan sesi varyasyonları için")
+                        speed_change_min = gr.Slider(label="Speed Change Min ⚠️", minimum=0.5, maximum=1.0, value=0.9, step=0.05, info="Minimum hız değiştirme oranı. Konuşma hızı varyasyonları için")
+                        speed_change_max = gr.Slider(label="Speed Change Max ⚠️", minimum=1.0, maximum=2.0, value=1.1, step=0.05, info="Maksimum hız değiştirme oranı. Konuşma hızı varyasyonları için")
+
+                        gr.Markdown("### 🎵 Background Mixing")
+                        bg_mix_prob = gr.Slider(label="Background Mix Probability ⚠️", minimum=0.0, maximum=1.0, value=0.7, step=0.05, info="Arka plan sesi karıştırma olasılığı. Gerçek dünya koşulları için")
+                        snr_min = gr.Slider(label="SNR Min (dB) ⚠️", minimum=-10, maximum=20, value=0, step=5, info="Minimum sinyal-gürültü oranı. Çok düşük değerler zorlu koşullar")
+                        snr_max = gr.Slider(label="SNR Max (dB) ⚠️", minimum=0, maximum=30, value=20, step=5, info="Maksimum sinyal-gürültü oranı. Temiz ses koşulları için")
+
+                with gr.Row():
+                    with gr.Column(scale=1):
+                        gr.Markdown("### 🎵 Feature Processing")
+                        delta = gr.Checkbox(label="Include Delta Features ⚠️", value=True, info="Delta özelliklerini dahil et. Zaman değişimlerini yakalar")
+                        delta_delta = gr.Checkbox(label="Include Delta-Delta Features ⚠️", value=False, info="Delta-delta özelliklerini dahil et. İkinci dereceden değişimler")
+                        mean_norm = gr.Checkbox(label="Mean Normalization ⚠️", value=True, info="Ortalama normalizasyonu uygula. Özellikleri merkezler")
+                        var_norm = gr.Checkbox(label="Variance Normalization ⚠️", value=False, info="Varyans normalizasyonu uygula. Özellikleri ölçeklendirir")
+
+                        gr.Markdown("### 🔄 Advanced Augmentation")
+                        time_shift_enabled = gr.Checkbox(label="Enable Time Shifting ⚠️", value=True, info="Zaman kaydırma artırmayı etkinleştir. Farklı zamanlamalar simüle eder")
+                        pitch_shift_enabled = gr.Checkbox(label="Enable Pitch Shifting ⚠️", value=True, info="Perde değiştirme artırmayı etkinleştir. Farklı ses tonları için")
+                        speed_change_enabled = gr.Checkbox(label="Enable Speed Changing ⚠️", value=True, info="Hız değiştirme artırmayı etkinleştir. Konuşma hızı varyasyonları için")
+                        noise_addition_enabled = gr.Checkbox(label="Enable Noise Addition ⚠️", value=True, info="Gürültü ekleme artırmayı etkinleştir. Gerçek dünya koşulları için")
+                        rirs_augmentation = gr.Checkbox(label="Enable RIRS Augmentation ⚠️", value=False, info="Oda impulse response artırmayı etkinleştir. RIRS dataset gerekli")
+
+                    with gr.Column(scale=1):
+                        gr.Markdown("### 🏠 RIRS Settings")
+                        rirs_snr_min = gr.Slider(label="RIRS SNR Min (dB) ⚠️", minimum=0, maximum=20, value=5, step=1, info="RIRS için minimum SNR. Oda akustiği simülasyonu için")
+                        rirs_snr_max = gr.Slider(label="RIRS SNR Max (dB) ⚠️", minimum=5, maximum=30, value=20, step=1, info="RIRS için maksimum SNR. Oda akustiği simülasyonu için")
+                        rirs_probability = gr.Slider(label="RIRS Probability ⚠️", minimum=0.0, maximum=1.0, value=0.3, step=0.05, info="RIRS uygulama olasılığı. RIRS dataset mevcut olmalı")
+                        max_rir_length = gr.Slider(label="Max RIR Length (s) ⚠️", minimum=1.0, maximum=10.0, value=3.0, step=0.5, info="Maksimum oda impulse response uzunluğu")
+
+                # Dataset paths ve load button en alta
+                with gr.Row():
+                    with gr.Column():
+                        gr.Markdown("### 📁 Dataset Paths")
                         positive_dir = gr.Textbox(label="Positive Dataset Path", value="./positive_dataset", placeholder="Wakeword recordings")
                         negative_dir = gr.Textbox(label="Negative Dataset Path", value="./negative_dataset", placeholder="Negative samples")
                         background_dir = gr.Textbox(label="Background Noise Path", value="./background_noise", placeholder="Background noise files")
 
-                        gr.Markdown("### 📊 Data Split")
-                        val_split = gr.Slider(label="Validation Split", minimum=0.1, maximum=0.3, value=0.2, step=0.05)
-                        test_split = gr.Slider(label="Test Split", minimum=0.05, maximum=0.3, value=0.1, step=0.05)
-                        batch_size = gr.Slider(label="Batch Size", minimum=8, maximum=64, value=32, step=8)
-
                         load_data_btn = gr.Button("📥 Load Data", variant="primary")
                         data_status = gr.Textbox(label="Data Status", interactive=False, lines=8)
-
-                    with gr.Column(scale=1):
-                        gr.Markdown("### 🧠 Model Configuration")
-                        hidden_size = gr.Slider(label="Hidden Size", minimum=128, maximum=1024, value=256, step=64)
-                        num_layers = gr.Slider(label="LSTM Layers", minimum=1, maximum=4, value=2, step=1)
-                        dropout = gr.Slider(label="Dropout", minimum=0.0, maximum=0.8, value=0.6, step=0.1)
-
-                        gr.Markdown("### 🎯 Training Configuration")
-                        epochs = gr.Slider(label="Epochs", minimum=10, maximum=200, value=100, step=10)
-                        learning_rate = gr.Dropdown(label="Learning Rate", choices=["0.001", "0.0005", "0.0001", "0.00005"], value="0.0001")
-                        lr = gr.Number(label="Custom Learning Rate", value=0.0001, precision=5)
-
-                        gr.Markdown("### 🔊 Audio Configuration")
-                        sample_rate = gr.Dropdown(label="Sample Rate", choices=["8000", "16000", "22050", "44100"], value="16000")
-                        duration = gr.Slider(label="Audio Duration (s)", minimum=0.5, maximum=3.0, value=1.7, step=0.1)
-                        n_mels = gr.Slider(label="Mel Bands", minimum=40, maximum=128, value=80, step=8)
-
-                with gr.Row():
-                    with gr.Column():
-                        gr.Markdown("### 📈 Data Augmentation")
-                        aug_prob = gr.Slider(label="Augmentation Probability", minimum=0.0, maximum=1.0, value=0.85, step=0.05)
-                        noise_factor = gr.Slider(label="Noise Factor", minimum=0.0, maximum=0.5, value=0.15, step=0.05)
-                        time_shift = gr.Slider(label="Time Shift (s)", minimum=0.0, maximum=0.5, value=0.3, step=0.05)
-                        pitch_shift = gr.Slider(label="Pitch Shift (semitones)", minimum=0.0, maximum=3.0, value=1.5, step=0.5)
-
-                    with gr.Column():
-                        gr.Markdown("### 🎵 Background Mixing")
-                        bg_mix_prob = gr.Slider(label="Background Mix Probability", minimum=0.0, maximum=1.0, value=0.7, step=0.05)
-                        snr_min = gr.Slider(label="SNR Min (dB)", minimum=-10, maximum=20, value=0, step=5)
-                        snr_max = gr.Slider(label="SNR Max (dB)", minimum=0, maximum=30, value=20, step=5)
-
-                        gr.Markdown("### 🛡️ Training Safety")
-                        patience = gr.Slider(label="Early Stopping Patience", minimum=3, maximum=30, value=10, step=1)
-                        gradient_clip = gr.Slider(label="Gradient Clip Norm", minimum=0.1, maximum=5.0, value=1.0, step=0.1)
 
             # Tab 2: Training
             with gr.TabItem("🚀 Training"):
@@ -1758,14 +1796,36 @@ def create_enhanced_interface():
                               aug_prob, noise_factor, time_shift, pitch_shift,
                               bg_mix_prob, snr_min, snr_max,
                               hidden_size, num_layers, dropout,
-                              patience, gradient_clip):
+                              grad_clip_max_norm, weight_decay, use_amp,
+                              feature_cache_size, audio_cache_size,
+                              patience,
+                              n_fft, hop_length, win_length, fmin, fmax,
+                              speed_change_min, speed_change_max,
+                              delta, delta_delta, mean_norm, var_norm,
+                              time_shift_enabled, pitch_shift_enabled, speed_change_enabled, noise_addition_enabled, rirs_augmentation,
+                              rirs_snr_min, rirs_snr_max, rirs_probability, max_rir_length):
             # Apply audio/model/augmentation configs immediately
             app.apply_audio_config(int(sample_rate), float(duration), int(n_mels))
+            # Update additional audio config
+            AudioConfig.N_FFT = int(n_fft)
+            AudioConfig.HOP_LENGTH = int(hop_length)
+            AudioConfig.WIN_LENGTH = int(win_length)
+            AudioConfig.FMIN = int(fmin)
+            AudioConfig.FMAX = int(fmax)
             app.apply_augmentation_config(float(aug_prob), float(noise_factor), float(time_shift), float(pitch_shift))
+            # Update speed change config
+            AugmentationConfig.SPEED_CHANGE_MIN = float(speed_change_min)
+            AugmentationConfig.SPEED_CHANGE_MAX = float(speed_change_max)
             app.rebuild_model(int(hidden_size), int(num_layers), float(dropout))
-            # Update trainer safety knobs
+            # Update trainer safety knobs and advanced settings
             app.trainer.patience = int(patience)
-            app.trainer.grad_clip_max_norm = float(gradient_clip)
+            app.trainer.grad_clip_max_norm = float(grad_clip_max_norm)
+            app.trainer.use_amp = bool(use_amp)
+            # Update training config
+            TrainingConfig.WEIGHT_DECAY = float(weight_decay)
+            # Update cache settings
+            app.processor._cache_size = int(audio_cache_size)
+            # Note: feature_cache_size would need to be implemented in the feature extraction pipeline
             # Load data using background mixing and SNR range
             return app.load_data(
                 positive_dir, negative_dir, background_dir,
@@ -1776,12 +1836,24 @@ def create_enhanced_interface():
         def start_training_handler(epochs, lr, batch_size, dropout,
                                    sample_rate, duration, n_mels,
                                    hidden_size, num_layers,
-                                   patience, gradient_clip):
+                                   grad_clip_max_norm, weight_decay, use_amp,
+                                   patience,
+                                   n_fft, hop_length, win_length, fmin, fmax,
+                                   speed_change_min, speed_change_max):
             # Ensure latest audio/model and safety settings are applied
             app.apply_audio_config(int(sample_rate), float(duration), int(n_mels))
+            AudioConfig.N_FFT = int(n_fft)
+            AudioConfig.HOP_LENGTH = int(hop_length)
+            AudioConfig.WIN_LENGTH = int(win_length)
+            AudioConfig.FMIN = int(fmin)
+            AudioConfig.FMAX = int(fmax)
+            AugmentationConfig.SPEED_CHANGE_MIN = float(speed_change_min)
+            AugmentationConfig.SPEED_CHANGE_MAX = float(speed_change_max)
             app.rebuild_model(int(hidden_size), int(num_layers), float(dropout))
             app.trainer.patience = int(patience)
-            app.trainer.grad_clip_max_norm = float(gradient_clip)
+            app.trainer.grad_clip_max_norm = float(grad_clip_max_norm)
+            app.trainer.use_amp = bool(use_amp)
+            TrainingConfig.WEIGHT_DECAY = float(weight_decay)
             return app.start_training(int(epochs), float(lr), int(batch_size), float(dropout), hidden_size=int(hidden_size), num_layers=int(num_layers))
 
         def update_training_plots():
@@ -1793,8 +1865,8 @@ def create_enhanced_interface():
         def save_model_handler():
             return app.save_model()
 
-        def test_model_handler():
-            return app.test_model()
+        def test_model_handler(test_threshold):
+            return app.test_model(threshold=test_threshold)
 
         def refresh_files_handler():
             files = []
@@ -1813,14 +1885,21 @@ def create_enhanced_interface():
                 aug_prob, noise_factor, time_shift, pitch_shift,
                 bg_mix_prob, snr_min, snr_max,
                 hidden_size, num_layers, dropout,
-                patience, gradient_clip
+                grad_clip_max_norm, weight_decay, use_amp,
+                feature_cache_size, audio_cache_size,
+                patience,
+                n_fft, hop_length, win_length, fmin, fmax,
+                speed_change_min, speed_change_max,
+                delta, delta_delta, mean_norm, var_norm,
+                time_shift_enabled, pitch_shift_enabled, speed_change_enabled, noise_addition_enabled, rirs_augmentation,
+                rirs_snr_min, rirs_snr_max, rirs_probability, max_rir_length
             ],
             outputs=[data_status]
         )
 
         start_btn.click(
             start_training_handler,
-            inputs=[epochs, lr, batch_size, dropout, sample_rate, duration, n_mels, hidden_size, num_layers, patience, gradient_clip],
+            inputs=[epochs, lr, batch_size, dropout, sample_rate, duration, n_mels, hidden_size, num_layers, grad_clip_max_norm, weight_decay, use_amp, patience, n_fft, hop_length, win_length, fmin, fmax, speed_change_min, speed_change_max],
             outputs=[training_status]
         )
 
@@ -1851,6 +1930,7 @@ def create_enhanced_interface():
 
         test_btn.click(
             test_model_handler,
+            inputs=[test_threshold],
             outputs=[test_results, evaluation_plots]
         )
 
