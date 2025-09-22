@@ -58,8 +58,8 @@ except Exception:
 # Configuration Classes (same as before)
 class AudioConfig:
     SAMPLE_RATE = 16000
-    DURATION = 1.7
-    N_MELS = 80
+    DURATION = 1.5  # seconds
+    N_MELS = 96
     N_FFT = 2048
     HOP_LENGTH = 512
     WIN_LENGTH = 2048
@@ -67,20 +67,20 @@ class AudioConfig:
     FMAX = 8000
 
 class ModelConfig:
-    HIDDEN_SIZE = 256
+    HIDDEN_SIZE = 512
     NUM_LAYERS = 2
-    DROPOUT = 0.6
+    DROPOUT = 0.3
     NUM_CLASSES = 2
 
 class TrainingConfig:
-    BATCH_SIZE = 32
-    LEARNING_RATE = 0.0001
+    BATCH_SIZE = 64
+    LEARNING_RATE = 0.00001
     EPOCHS = 100
     VALIDATION_SPLIT = 0.2
     TEST_SPLIT = 0.1
 
 class AugmentationConfig:
-    AUGMENTATION_PROB = 0.85
+    AUGMENTATION_PROB = 0.6
     NOISE_FACTOR = 0.15
     TIME_SHIFT_MAX = 0.3
     PITCH_SHIFT_MAX = 1.5
@@ -322,7 +322,7 @@ class WakewordModel(nn.Module):
 class EnhancedWakewordDataset(Dataset):
     def __init__(self, wakeword_files, hard_negative_files, random_negative_files,
                  background_files, processor, augment=False,
-                 background_mix_prob=0.7, snr_range=(0, 20)):
+                 background_mix_prob=0.5, snr_range=(0, 20)):
 
         self.processor = processor
         self.augment = augment
@@ -458,7 +458,8 @@ class WakewordTrainer:
         self.device = device
         self.config = config
 
-        self.criterion = nn.CrossEntropyLoss().to(device)
+        class_weights = torch.tensor([1.0, 2.5]).to(device)  # [negative, wakeword]
+        self.criterion = nn.CrossEntropyLoss(weight=class_weights).to(device)
         self.optimizer = optim.Adam(model.parameters(), lr=config.LEARNING_RATE, weight_decay=1e-5)
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='max', factor=0.5, patience=5)
 
@@ -1160,20 +1161,41 @@ class WakewordTrainingApp:
                 except Exception:
                     pass
 
+            # İsim bazlı hard/random negative ayırma
+            hard_negative_train = [f for f in negative_train if 'similar_' in os.path.basename(f)]
+            random_negative_train = [f for f in negative_train if 'similar_' not in os.path.basename(f)]
+
+            hard_negative_val = [f for f in negative_val if 'similar_' in os.path.basename(f)]
+            random_negative_val = [f for f in negative_val if 'similar_' not in os.path.basename(f)]
+
+            # Eğer hard negative bulunamazsa, eski yönteme dön
+            if not hard_negative_train:
+                print("⚠️ İsimde similar_ bulunamadı, dosyaları yarıya bölüyorum...")
+                hard_negative_train = negative_train[:len(negative_train)//2]
+                random_negative_train = negative_train[len(negative_train)//2:]
+
+            if not hard_negative_val:
+                hard_negative_val = negative_val[:len(negative_val)//2]
+                random_negative_val = negative_val[len(negative_val)//2:]
+
+            # Debug için sayıları yazdır
+            print(f"📊 Hard Negatives: Train={len(hard_negative_train)}, Val={len(hard_negative_val)}")
+            print(f"📊 Random Negatives: Train={len(random_negative_train)}, Val={len(random_negative_val)}")
+
             # Create datasets
             train_dataset = EnhancedWakewordDataset(
-                wakeword_train, negative_train[:len(negative_train)//2],
-                negative_train[len(negative_train)//2:], background_files,
+                wakeword_train, hard_negative_train,
+                random_negative_train, background_files,
                 self.processor, augment=True,
                 background_mix_prob=float(background_mix_prob),
                 snr_range=(float(snr_min), float(snr_max))
             )
 
             val_dataset = EnhancedWakewordDataset(
-                wakeword_val, negative_val[:len(negative_val)//2],
-                negative_val[len(negative_val)//2:], background_files[:50],
+                wakeword_val, hard_negative_val,
+                random_negative_val, background_files[:50],
                 self.processor, augment=False,
-                background_mix_prob=float(background_mix_prob) * 0.5,  # lighter mixing on val
+                background_mix_prob=float(background_mix_prob) * 0.5,
                 snr_range=(max(float(snr_min), 5.0), min(float(snr_max), 15.0))
             )
 
@@ -1381,7 +1403,7 @@ class WakewordTrainingApp:
         else:
             return "❌ Kaydedilecek model bulunamadı. Önce eğitim yapın."
 
-    def test_model(self):
+    def test_model(self, threshold=0.35):
         if not os.path.exists('best_wakeword_model.pth'):
             return "❌ Test edilecek model bulunamadı", None
 
@@ -1401,7 +1423,7 @@ class WakewordTrainingApp:
                     data, target = data.to(self.device), target.to(self.device).squeeze()
                     logits = self.model(data)
                     probs = torch.softmax(logits, dim=1)[:, 1]
-                    _, predicted = torch.max(logits, 1)
+                    predicted = (probs >= 0.3).long()  # 0.3 threshold kullan
 
                     all_preds.extend(predicted.detach().cpu().numpy().tolist())
                     all_labels.extend(target.detach().cpu().numpy().tolist())
@@ -1635,6 +1657,16 @@ def create_enhanced_interface():
                 with gr.Row():
                     with gr.Column(scale=1):
                         gr.Markdown("### 🧪 Model Testing")
+
+                        # YENİ: Threshold slider ekle
+                        test_threshold = gr.Slider(
+                            label="Detection Threshold",
+                            minimum=0.1,
+                            maximum=0.9,
+                            value=0.35,  # False negative azaltmak için düşük başla
+                            step=0.05,
+                            info="Lower = fewer missed detections (but more false alarms)"
+                        )
                         test_btn = gr.Button("🔬 Run Model Test", variant="primary")
                         test_results = gr.Textbox(label="Test Results", interactive=False, lines=10)
 
