@@ -458,6 +458,8 @@ class EnhancedWakewordDataset(Dataset):
 
         if audio is None:
             mel_spec = np.zeros((self.processor.config.N_MELS, 31), dtype=np.float32)
+            mel_array = np.ascontiguousarray(mel_spec, dtype=np.float32)
+            mel_tensor = torch.from_numpy(mel_array).unsqueeze(0)
         else:
             if self.augment:
                 audio = self.processor.augment_audio(audio)
@@ -473,7 +475,6 @@ class EnhancedWakewordDataset(Dataset):
                 mel_array = np.ascontiguousarray(mel_spec, dtype=np.float32)
                 mel_tensor = torch.from_numpy(mel_array).unsqueeze(0)
         label_tensor = torch.tensor(label, dtype=torch.long)
-
         return mel_tensor, label_tensor
 
 # Training Class (same as before)
@@ -1787,7 +1788,8 @@ def create_enhanced_interface():
                         background_dir = gr.Textbox(label="Background Noise Path", value=last_config.get("background_dir", "./background_noise"), placeholder="Background noise files")
 
                         load_data_btn = gr.Button("📥 Load Data", variant="primary")
-                        data_status = gr.Textbox(label="Data Status", interactive=False, lines=8)
+                        # Markdown olarak göster ki biçimlendirme düzgün rendersin
+                        data_status = gr.Markdown("")
 
                     with gr.Column(scale=1):
                         gr.Markdown("""
@@ -1996,6 +1998,9 @@ def create_enhanced_interface():
                 batch_size, val_split, test_split,
                 background_mix_prob=bg_mix_prob, snr_min=snr_min, snr_max=snr_max
             )
+            # Yalnızca insan-okunur Markdown metnini döndür (tuple değil)
+            if isinstance(result, tuple) and len(result) >= 1:
+                result = result[0]
 
             # Save current configuration for next session
             current_config = {
