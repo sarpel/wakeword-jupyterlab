@@ -1,0 +1,142 @@
+Audio File Analyzer    
+============================================================
+Analyzing audio files in: C:\Users\Sarpel\Desktop\wakeword-jupyterlab\negative_dataset
+============================================================
+Processed 215049 audio files    (64k)(8.75x)
+
+AUDIO FILE ANALYSIS SUMMARY
+================================================================================
+
+📁 FOLDER: LJSpeech-1.1
+----------------------------------------
+Total Files: 13100
+Total Size: 3.54 GB (3,798,339,464 bytes)
+Total Duration: 23:55:17
+Average Duration: 0:00:06
+
+File Types:
+  .wav: 13100 files (100.0%)
+
+📁 FOLDER: LibriSpeech
+----------------------------------------
+Total Files: 28539
+Total Size: 10.79 GB (11,590,295,378 bytes)
+Total Duration: 100:35:27
+Average Duration: 0:00:12
+
+File Types:
+  .wav: 28539 files (100.0%)
+
+📁 FOLDER: common_voice_en_16k_subset_24h
+----------------------------------------
+Total Files: 14711
+Total Size: 2.38 GB (2,556,685,506 bytes)
+Total Duration: 22:11:00
+Average Duration: 0:00:05
+
+File Types:
+  .wav: 14711 files (100.0%)
+
+📁 FOLDER: common_voice_tr_16k_subset_36h
+----------------------------------------
+Total Files: 36658
+Total Size: 4.32 GB (4,639,607,450 bytes)
+Total Duration: 40:14:58
+Average Duration: 0:00:03
+
+File Types:
+  .wav: 36658 files (100.0%)
+
+📁 FOLDER: cv-singleword-en
+----------------------------------------
+Total Files: 49370
+Total Size: 3.96 GB (4,247,427,348 bytes)
+Total Duration: 36:50:11
+Average Duration: 0:00:02
+
+File Types:
+  .wav: 49370 files (100.0%)
+
+📁 FOLDER: cv-singleword-tr
+----------------------------------------
+Total Files: 537
+Total Size: 39.06 MB (40,958,802 bytes)
+Total Duration: 0:21:18
+Average Duration: 0:00:02
+
+File Types:
+  .wav: 537 files (100.0%)
+
+📁 FOLDER: cv_en_16k
+----------------------------------------
+Total Files: 2950
+Total Size: 472.69 MB (495,646,548 bytes)
+Total Duration: 4:18:01
+Average Duration: 0:00:05
+
+File Types:
+  .wav: 2950 files (100.0%)
+
+📁 FOLDER: hard_negative_wakewords
+----------------------------------------
+Total Files: 2350
+Total Size: 84.28 MB (88,370,950 bytes)
+Total Duration: 0:45:58
+Average Duration: 0:00:01
+
+File Types:
+  .wav: 2350 files (100.0%)
+
+📁 FOLDER: ms_snsd
+----------------------------------------
+Total Files: 23075
+Total Size: 2.04 GB (2,193,374,024 bytes)
+Total Duration: 19:01:51
+Average Duration: 0:00:02
+
+File Types:
+  .wav: 23075 files (100.0%)
+
+📁 FOLDER: multi_voice_similar_wakeword_outputs
+----------------------------------------
+Total Files: 2952
+Total Size: 104.57 MB (109,651,286 bytes)
+Total Duration: 0:57:02
+Average Duration: 0:00:01
+
+File Types:
+  .wav: 2952 files (100.0%)
+
+📁 FOLDER: nonwakeword_16k
+----------------------------------------
+Total Files: 2206
+Total Size: 175.92 MB (184,460,900 bytes)
+Total Duration: 1:35:53
+Average Duration: 0:00:02
+
+File Types:
+  .wav: 2206 files (100.0%)
+
+📁 FOLDER: speech-commands
+----------------------------------------
+Total Files: 38601
+Total Size: 1.14 GB (1,225,805,602 bytes)
+Total Duration: 10:37:33
+Average Duration: 0:00:00
+
+File Types:
+  .wav: 38601 files (100.0%)
+
+================================================================================
+GRAND TOTALS
+================================================================================
+Total Audio Files: 215,049
+Total Size: 29.03 GB (31,170,623,258 bytes)
+Total Size (GB): 29.03 GB
+Total Duration: 261:24:34
+Total Duration (Hours): 261.41 hours
+
+File Type Summary Across All Folders:
+  .wav: 215,049 files (100.0%)
+
+Analysis completed in 153.95 seconds

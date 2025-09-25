@@ -1,0 +1,32 @@
+Audio File Analyzer 
+============================================================
+Analyzing audio files in: C:\Users\Sarpel\Desktop\wakeword-jupyterlab\negative_dataset\hard_negative_wakewords
+============================================================
+Processed 5302 audio files   (33k)(4.5x)
+
+AUDIO FILE ANALYSIS SUMMARY
+================================================================================
+
+📁 FOLDER: ROOT
+----------------------------------------
+Total Files: 5302
+Total Size: 188.85 MB (198,022,236 bytes)
+Total Duration: 1:43:00
+Average Duration: 0:00:01
+
+File Types:
+  .wav: 5302 files (100.0%)
+
+================================================================================
+GRAND TOTALS
+================================================================================
+Total Audio Files: 5,302
+Total Size: 188.85 MB (198,022,236 bytes)
+Total Size (GB): 0.18 GB
+Total Duration: 1:43:00
+Total Duration (Hours): 1.72 hours
+
+File Type Summary Across All Folders:
+  .wav: 5,302 files (100.0%)
+
+Analysis completed in 19.86 seconds

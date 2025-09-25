@@ -1,0 +1,52 @@
+Audio File Analyzer
+============================================================
+Analyzing audio files in: C:\Users\Sarpel\Desktop\wakeword-jupyterlab\positive_dataset
+============================================================
+Processed 7392 audio files
+
+AUDIO FILE ANALYSIS SUMMARY
+================================================================================
+
+📁 FOLDER: multi_voice_wakeword_outputs_1010
+----------------------------------------
+Total Files: 1011
+Total Size: 37.62 MB (39,443,278 bytes)
+Total Duration: 0:20:31
+Average Duration: 0:00:01
+
+File Types:
+  .wav: 1011 files (100.0%)
+
+📁 FOLDER: my_positive_samples_5283
+----------------------------------------
+Total Files: 5283
+Total Size: 201.65 MB (211,448,578 bytes)
+Total Duration: 1:21:25
+Average Duration: 0:00:00
+
+File Types:
+  .wav: 5283 files (100.0%)
+
+📁 FOLDER: positive_wakewords_1100
+----------------------------------------
+Total Files: 1098
+Total Size: 38.72 MB (40,596,686 bytes)
+Total Duration: 0:21:07
+Average Duration: 0:00:01
+
+File Types:
+  .wav: 1098 files (100.0%)
+
+================================================================================
+GRAND TOTALS
+================================================================================
+Total Audio Files: 7,392
+Total Size: 277.99 MB (291,488,542 bytes)
+Total Size (GB): 0.27 GB
+Total Duration: 2:03:03
+Total Duration (Hours): 2.05 hours
+
+File Type Summary Across All Folders:
+  .wav: 7,392 files (100.0%)
+
+Analysis completed in 25.64 seconds
