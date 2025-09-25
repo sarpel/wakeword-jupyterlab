@@ -45,7 +45,7 @@ class AudioConfig:
     FMAX = 8000
 
 class ModelConfig:
-    HIDDEN_SIZE = 256
+    HIDDEN_SIZE = 512
     NUM_LAYERS = 2
     DROPOUT = 0.6
     NUM_CLASSES = 2
@@ -80,7 +80,13 @@ class AudioProcessor:
     def normalize_audio(self, audio):
         if len(audio) == 0:
             return audio
-        return audio / np.max(np.abs(audio))
+        # Remove NaN/inf
+        audio = np.nan_to_num(audio, nan=0.0, posinf=1.0, neginf=-1.0)
+        max_abs = np.max(np.abs(audio))
+        if max_abs > 0:
+            return audio / max_abs
+        else:
+            return np.zeros_like(audio)
 
     def pad_or_truncate(self, audio, target_length):
         if len(audio) > target_length:
@@ -741,8 +747,12 @@ class WakewordTrainingApp:
             )
 
             # Create dataloaders
-            self.train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=2)
-            self.val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=2)
+            # On Windows, multi-processing workers can cause storage resize errors with numpy/librosa.
+            # Use single-process loading there for stability.
+            import os as _os
+            _num_workers = 0 if _os.name == 'nt' else 2
+            self.train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=_num_workers, collate_fn=collate_fn)
+            self.val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=_num_workers, collate_fn=collate_fn)
 
             data_info = f"""
 ✅ Veri Yükleme Başarılı!
@@ -1001,14 +1011,14 @@ def create_enhanced_interface():
                         gr.Markdown("### 📊 Data Split")
                         val_split = gr.Slider(label="Validation Split", minimum=0.1, maximum=0.3, value=0.2, step=0.05)
                         test_split = gr.Slider(label="Test Split", minimum=0.1, maximum=0.3, value=0.1, step=0.05)
-                        batch_size = gr.Slider(label="Batch Size", minimum=8, maximum=64, value=32, step=8)
+                        batch_size = gr.Slider(label="Batch Size", minimum=8, maximum=128, value=100, step=8)
 
                         load_data_btn = gr.Button("📥 Load Data", variant="primary")
                         data_status = gr.Textbox(label="Data Status", interactive=False, lines=8)
 
                     with gr.Column(scale=1):
                         gr.Markdown("### 🧠 Model Configuration")
-                        hidden_size = gr.Slider(label="Hidden Size", minimum=128, maximum=512, value=256, step=64)
+                        hidden_size = gr.Slider(label="Hidden Size", minimum=128, maximum=512, value=512, step=64)
                         num_layers = gr.Slider(label="LSTM Layers", minimum=1, maximum=4, value=2, step=1)
                         dropout = gr.Slider(label="Dropout", minimum=0.0, maximum=0.8, value=0.6, step=0.1)
 

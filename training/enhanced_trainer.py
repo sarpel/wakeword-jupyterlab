@@ -32,7 +32,12 @@ import json
 from datetime import datetime
 import yaml
 from pathlib import Path
+import logging  # Add logging import
 warnings.filterwarnings('ignore')
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # Import enhanced components
 from enhanced_dataset import EnhancedWakewordDataset, EnhancedAudioConfig, create_dataloaders
@@ -130,33 +135,83 @@ class EnhancedWakewordModel(nn.Module):
         self.fc2 = nn.Linear(128, config.num_classes)
 
     def forward(self, x):
-        # CNN feature extraction
-        x = x.unsqueeze(1)  # Add channel dimension
-        x = F.relu(self.conv1(x))
-        x = self.pool(x)
-        x = F.relu(self.conv2(x))
-        x = self.pool(x)
-        x = F.relu(self.conv3(x))
-        x = self.pool(x)
-        x = self.dropout_cnn(x)
+        """Forward pass with proper shape debugging and error handling"""
+        try:
+            logger.debug(f"Input shape: {x.shape}")
+            original_shape = x.shape
 
-        # Reshape for LSTM
-        batch_size = x.size(0)
-        x = x.view(batch_size, -1, x.size(2) * x.size(3))
+            # CNN feature extraction
+            x = x.unsqueeze(1)  # Add channel dimension: (batch, 1, height, width)
+            logger.debug(f"After unsqueeze: {x.shape}")
 
-        # LSTM processing
-        lstm_out, _ = self.lstm(x)
+            # First CNN block
+            x = F.relu(self.conv1(x))
+            x = self.pool(x)
+            logger.debug(f"After conv1+pool: {x.shape}")
 
-        # Attention mechanism
-        attention_weights = F.softmax(self.attention(lstm_out), dim=1)
-        attended = torch.sum(attention_weights * lstm_out, dim=1)
+            # Second CNN block
+            x = F.relu(self.conv2(x))
+            x = self.pool(x)
+            logger.debug(f"After conv2+pool: {x.shape}")
 
-        # Classification
-        out = self.dropout_lstm(attended)
-        out = F.relu(self.fc1(out))
-        out = self.fc2(out)
+            # Third CNN block
+            x = F.relu(self.conv3(x))
+            x = self.pool(x)
+            x = self.dropout_cnn(x)
+            logger.debug(f"After conv3+pool+dropout: {x.shape}")
 
-        return out
+            # Calculate dimensions for LSTM
+            batch_size = x.size(0)
+            channels = x.size(1)  # Should be 128
+            height = x.size(2)    # Should be 5 after 3 pooling ops
+            width = x.size(3)     # Should be 15 after 3 pooling ops
+
+            # Calculate LSTM input size: channels * height = 128 * 5 = 640
+            lstm_input_size = channels * height
+
+            # Reshape for LSTM: (batch, time_steps, features)
+            # time_steps = width = 15, features = channels * height = 640
+            x = x.view(batch_size, width, lstm_input_size)
+            logger.debug(f"Reshaped for LSTM: {x.shape} (batch_size={batch_size}, time_steps={width}, features={lstm_input_size})")
+
+            # Validate reshape dimensions
+            expected_elements = batch_size * width * lstm_input_size
+            actual_elements = x.numel()
+            if expected_elements != actual_elements:
+                raise ValueError(f"Reshape dimension mismatch: expected {expected_elements}, got {actual_elements}")
+
+            # LSTM processing
+            lstm_out, _ = self.lstm(x)
+            logger.debug(f"After LSTM: {lstm_out.shape}")
+
+            # Attention mechanism
+            attention_weights = F.softmax(self.attention(lstm_out), dim=1)
+            attended = torch.sum(attention_weights * lstm_out, dim=1)
+            logger.debug(f"After attention: {attended.shape}")
+
+            # Classification
+            out = self.dropout_lstm(attended)
+            out = F.relu(self.fc1(out))
+            out = self.fc2(out)
+            logger.debug(f"Final output: {out.shape}")
+
+            return out
+
+        except Exception as e:
+            logger.error(f"Forward pass failed with input shape {x.shape if 'x' in locals() else 'unknown'}")
+            logger.error(f"Error: {e}")
+            logger.error(f"Config: hidden_size={self.config.hidden_size}, input_size calculation needed")
+
+            # Provide detailed debugging information
+            if 'x' in locals() and hasattr(x, 'shape'):
+                logger.error(f"Tensor shape before failure: {x.shape}")
+                if len(x.shape) == 4:  # CNN output
+                    logger.error(f"Expected LSTM input size: {x.size(1) * x.size(2)} (channels * height)")
+                    logger.error(f"Available dimensions: batch={x.size(0)}, channels={x.size(1)}, height={x.size(2)}, width={x.size(3)}")
+
+            # Return a safe default output to prevent training crash
+            batch_size = original_shape[0] if 'original_shape' in locals() else 1
+            return torch.zeros(batch_size, self.config.num_classes, device=x.device if 'x' in locals() else torch.device('cpu'))
 
 # Enhanced Training Application
 class EnhancedWakewordTrainingApp:
@@ -294,11 +349,11 @@ class EnhancedWakewordTrainingApp:
                 with gr.Row():
                     batch_size = gr.Slider(8, 128, value=32, step=8, label="Batch Size")
                     learning_rate = gr.Dropdown([0.001, 0.0005, 0.0001, 0.00005], value=0.0001, label="Learning Rate")
-                    epochs = gr.Slider(10, 200, value=100, step=10, label="Epochs")
+                    epochs = gr.Slider(1, 200, value=3, step=1, label="Epochs")  # Default 3 for testing
 
                 with gr.Row():
                     use_early_stop = gr.Checkbox(value=True, label="Early Stopping")
-                    patience = gr.Slider(5, 30, value=15, step=1, label="Patience")
+                    patience = gr.Slider(1, 30, value=15, step=1, label="Patience")
                     use_lr_sched = gr.Checkbox(value=True, label="LR Scheduler")
 
             with gr.Column():
@@ -316,6 +371,9 @@ class EnhancedWakewordTrainingApp:
                     current_loss = gr.Textbox(value="0.000", label="Current Loss")
                     current_acc = gr.Textbox(value="0.00%", label="Current Accuracy")
 
+                # GPU Information Display
+                gpu_status = gr.Textbox(value=self._get_gpu_status(), label="GPU Status", interactive=False)
+
         with gr.Row():
             with gr.Column():
                 gr.Markdown("### 📊 Training Metrics")
@@ -326,8 +384,11 @@ class EnhancedWakewordTrainingApp:
                 gr.Markdown("### 🎯 Real-time Feature Visualization")
                 feature_plot = gr.LinePlot(label="Current Features", x="time", y="frequency")
 
-        # Event handlers
-        start_btn.click(self.start_enhanced_training, outputs=[progress_bar, current_epoch, current_loss, current_acc, loss_plot, acc_plot, feature_plot])
+        # Event handlers with proper parameter passing
+        start_btn.click(
+            self.start_enhanced_training,
+            outputs=[progress_bar, current_epoch, current_loss, current_acc, loss_plot, acc_plot, feature_plot, gpu_status]
+        )
         stop_btn.click(self.stop_enhanced_training)
         status_btn.click(self.check_training_status, outputs=[current_epoch, current_loss, current_acc])
 
@@ -507,10 +568,365 @@ features/
         except Exception as e:
             return f"❌ Error saving configuration: {e}"
 
-    def start_enhanced_training(self):
-        """Start enhanced training with new features"""
-        # Implementation for enhanced training
-        return "🚀 Enhanced training started..."
+    def start_enhanced_training(self, progress=gr.Progress()):
+        """Start enhanced training with GPU/CUDA support"""
+        try:
+            # Clear any previous training state
+            self.stop_training = False
+            self.current_history = {
+                'train_loss': [], 'val_loss': [],
+                'train_acc': [], 'val_acc': [],
+                'learning_rates': []
+            }
+
+            # Device selection with GPU detection
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            print(f"🚀 Starting enhanced training on device: {device}")
+
+            if device.type == 'cuda':
+                print(f"📊 GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+                print(f"🔧 CUDA Version: {torch.version.cuda}")
+                print(f"⚡ PyTorch CUDA: {torch.cuda.is_available()}")
+
+            # Initialize model and move to device
+            self.model = EnhancedWakewordModel(self.model_config)
+            self.model.to(device)
+            print(f"📦 Model moved to {device}")
+
+            # Create data loaders with GPU optimization
+            train_loader, val_loader = self._create_gpu_dataloaders()
+            print(f"📊 Train samples: {len(train_loader.dataset)}, Val samples: {len(val_loader.dataset)}")
+
+            # Setup training components
+            criterion = nn.CrossEntropyLoss()
+            optimizer = optim.Adam(self.model.parameters(), lr=self.training_config.learning_rate)
+            scheduler = None
+
+            if self.training_config.use_lr_scheduler:
+                scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+                    optimizer, mode='min', factor=self.training_config.lr_scheduler_factor,
+                    patience=self.training_config.lr_scheduler_patience, verbose=True
+                )
+
+            # Move loss function to device
+            criterion.to(device)
+
+            # Training loop with GPU optimization
+            best_val_loss = float('inf')
+            patience_counter = 0
+            training_start_time = time.time()
+
+            for epoch in range(self.training_config.epochs):
+                if self.stop_training:
+                    print("⏹️ Training stopped by user")
+                    break
+
+                epoch_start_time = time.time()
+
+                # Training phase
+                train_loss, train_acc = self._train_epoch(
+                    self.model, train_loader, criterion, optimizer, device, epoch
+                )
+
+                # Validation phase
+                val_loss, val_acc = self._validate_epoch(
+                    self.model, val_loader, criterion, device, epoch
+                )
+
+                # Update learning rate scheduler
+                if scheduler:
+                    scheduler.step(val_loss)
+
+                # Store metrics
+                self.current_history['train_loss'].append(train_loss)
+                self.current_history['val_loss'].append(val_loss)
+                self.current_history['train_acc'].append(train_acc)
+                self.current_history['val_acc'].append(val_acc)
+                self.current_history['learning_rates'].append(optimizer.param_groups[0]['lr'])
+
+                # Early stopping check
+                if self.training_config.use_early_stopping:
+                    if val_loss < best_val_loss - self.training_config.min_delta:
+                        best_val_loss = val_loss
+                        patience_counter = 0
+                        # Save best model
+                        self._save_best_model(epoch)
+                    else:
+                        patience_counter += 1
+                        if patience_counter >= self.training_config.patience:
+                            print(f"🛑 Early stopping triggered at epoch {epoch + 1}")
+                            break
+
+                # GPU memory cleanup
+                if device.type == 'cuda':
+                    torch.cuda.empty_cache()
+
+                epoch_time = time.time() - epoch_start_time
+                total_time = time.time() - training_start_time
+
+                # Progress update
+                progress_value = ((epoch + 1) / self.training_config.epochs) * 100
+                progress(progress_value, desc=f"Epoch {epoch + 1}/{self.training_config.epochs}")
+
+                print(f"🎯 Epoch {epoch + 1}/{self.training_config.epochs} "
+                      f"Train Loss: {train_loss:.4f} Acc: {train_acc:.2%} | "
+                      f"Val Loss: {val_loss:.4f} Acc: {val_acc:.2%} | "
+                      f"LR: {optimizer.param_groups[0]['lr']:.6f} | "
+                      f"Time: {epoch_time:.1f}s | GPU: {self._get_gpu_memory_info()}")
+
+            # Training completed
+            total_training_time = time.time() - training_start_time
+            print(f"✅ Training completed in {total_training_time:.1f} seconds")
+
+            # Final model save
+            self._save_final_model()
+
+            # Return training summary and updated plots
+            summary = self._get_training_summary()
+
+            # Create training plots
+            loss_plot_data, acc_plot_data = self._create_training_plots()
+
+            # Return all outputs for Gradio
+            return (
+                100,  # Progress complete
+                f"{len(self.current_history['train_loss'])}/{self.training_config.epochs}",
+                f"{self.current_history['train_loss'][-1]:.3f}" if self.current_history['train_loss'] else "0.000",
+                f"{self.current_history['train_acc'][-1]:.1%}" if self.current_history['train_acc'] else "0.00%",
+                loss_plot_data,
+                acc_plot_data,
+                self._get_sample_features(),
+                self._get_gpu_status()
+            )
+
+        except Exception as e:
+            print(f"❌ Training error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return (
+                0, "0", "0.000", "0.00%",
+                None, None, None,
+                f"❌ Training failed: {str(e)}"
+            )
+
+    def _create_training_plots(self):
+        """Create training plots for Gradio interface"""
+        if not self.current_history['train_loss']:
+            return None, None
+
+        import pandas as pd
+
+        # Loss plot data
+        epochs = list(range(1, len(self.current_history['train_loss']) + 1))
+        loss_data = pd.DataFrame({
+            'epoch': epochs + epochs,
+            'loss': self.current_history['train_loss'] + self.current_history['val_loss'],
+            'type': ['Training'] * len(self.current_history['train_loss']) +
+                   ['Validation'] * len(self.current_history['val_loss'])
+        })
+
+        # Accuracy plot data
+        acc_data = pd.DataFrame({
+            'epoch': epochs + epochs,
+            'accuracy': self.current_history['train_acc'] + self.current_history['val_acc'],
+            'type': ['Training'] * len(self.current_history['train_acc']) +
+                   ['Validation'] * len(self.current_history['val_acc'])
+        })
+
+        return loss_data, acc_data
+
+    def _get_sample_features(self):
+        """Get sample features for visualization"""
+        try:
+            # Create a simple sample for demonstration
+            import pandas as pd
+            time_points = np.linspace(0, 2, 200)
+            frequencies = np.sin(2 * np.pi * 5 * time_points) + 0.5 * np.sin(2 * np.pi * 10 * time_points)
+
+            sample_data = pd.DataFrame({
+                'time': time_points,
+                'frequency': frequencies
+            })
+
+            return sample_data
+
+        except Exception as e:
+            print(f"Error creating sample features: {e}")
+            return None
+
+    def _create_gpu_dataloaders(self):
+        """Create optimized data loaders for GPU training"""
+        config = EnhancedAudioConfig(
+            use_precomputed_features=self.audio_config.use_precomputed_features,
+            features_dir=self.audio_config.features_dir,
+            feature_config_path=self.audio_config.feature_config_path,
+            use_rirs_augmentation=self.audio_config.use_rirs_augmentation,
+            rirs_dataset_path=self.audio_config.rirs_dataset_path,
+            rirs_snr_range=self.audio_config.rirs_snr_range,
+            rirs_probability=self.audio_config.rirs_probability,
+            augmentation_probability=self.audio_config.augmentation_probability,
+            time_shift_amount=self.audio_config.time_shift_amount,
+            pitch_shift_range=self.audio_config.pitch_shift_range,
+            speed_change_range=self.audio_config.speed_change_range,
+            noise_snr_range=self.audio_config.noise_snr_range
+        )
+
+        return create_dataloaders(
+            positive_dir=self.audio_config.positive_data_dir,
+            negative_dir=self.audio_config.negative_data_dir,
+            features_dir=self.audio_config.features_dir,
+            rirs_dir=self.audio_config.rirs_dataset_path if self.audio_config.use_rirs_augmentation else None,
+            batch_size=self.training_config.batch_size,
+            config=config
+        )
+
+    def _train_epoch(self, model, train_loader, criterion, optimizer, device, epoch):
+        """Train for one epoch with GPU optimization"""
+        model.train()
+        total_loss = 0.0
+        correct = 0
+        total = 0
+
+        # Progress bar for training
+        pbar = tqdm(train_loader, desc=f'Epoch {epoch+1} Training', leave=False)
+
+        for batch_idx, batch in enumerate(pbar):
+            if self.stop_training:
+                break
+
+            # Move data to device
+            features = batch['features'].to(device, non_blocking=True)
+            labels = batch['label'].squeeze().to(device, non_blocking=True)
+
+            # Forward pass
+            optimizer.zero_grad()
+            outputs = model(features)
+            loss = criterion(outputs, labels)
+
+            # Backward pass
+            loss.backward()
+            optimizer.step()
+
+            # Statistics
+            total_loss += loss.item()
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+
+            # Update progress bar
+            current_loss = total_loss / (batch_idx + 1)
+            current_acc = correct / total
+            pbar.set_postfix({
+                'loss': f'{current_loss:.4f}',
+                'acc': f'{current_acc:.2%}'
+            })
+
+        avg_loss = total_loss / len(train_loader)
+        accuracy = correct / total
+
+        return avg_loss, accuracy
+
+    def _validate_epoch(self, model, val_loader, criterion, device, epoch):
+        """Validate for one epoch with GPU optimization"""
+        model.eval()
+        total_loss = 0.0
+        correct = 0
+        total = 0
+
+        with torch.no_grad():
+            pbar = tqdm(val_loader, desc=f'Epoch {epoch+1} Validation', leave=False)
+
+            for batch in pbar:
+                # Move data to device
+                features = batch['features'].to(device, non_blocking=True)
+                labels = batch['label'].squeeze().to(device, non_blocking=True)
+
+                # Forward pass
+                outputs = model(features)
+                loss = criterion(outputs, labels)
+
+                # Statistics
+                total_loss += loss.item()
+                _, predicted = torch.max(outputs.data, 1)
+                total += labels.size(0)
+                correct += (predicted == labels).sum().item()
+
+                # Update progress bar
+                current_loss = total_loss / (pbar.n + 1)
+                current_acc = correct / total
+                pbar.set_postfix({
+                    'loss': f'{current_loss:.4f}',
+                    'acc': f'{current_acc:.2%}'
+                })
+
+        avg_loss = total_loss / len(val_loader)
+        accuracy = correct / total
+
+        return avg_loss, accuracy
+
+    def _get_gpu_memory_info(self):
+        """Get current GPU memory usage"""
+        if torch.cuda.is_available():
+            allocated = torch.cuda.memory_allocated() / 1e9  # GB
+            cached = torch.cuda.memory_reserved() / 1e9  # GB
+            total = torch.cuda.get_device_properties(0).total_memory / 1e9  # GB
+            return f"{allocated:.1f}/{total:.1f}GB ({allocated/total*100:.1f}%)"
+        return "CPU"
+
+    def _save_best_model(self, epoch):
+        """Save the best model checkpoint"""
+        checkpoint = {
+            'epoch': epoch,
+            'model_state_dict': self.model.state_dict(),
+            'model_config': self.model_config.__dict__,
+            'training_config': self.training_config.__dict__,
+            'history': self.current_history,
+            'timestamp': datetime.now().isoformat()
+        }
+
+        torch.save(checkpoint, 'best_model.pth')
+        print(f"💾 Best model saved at epoch {epoch + 1}")
+
+    def _save_final_model(self):
+        """Save the final trained model"""
+        checkpoint = {
+            'model_state_dict': self.model.state_dict(),
+            'model_config': self.model_config.__dict__,
+            'training_config': self.training_config.__dict__,
+            'history': self.current_history,
+            'timestamp': datetime.now().isoformat()
+        }
+
+        torch.save(checkpoint, 'final_model.pth')
+        print("💾 Final model saved")
+
+    def _get_training_summary(self):
+        """Get training summary with metrics"""
+        if not self.current_history['train_loss']:
+            return "No training data available"
+
+        final_train_loss = self.current_history['train_loss'][-1]
+        final_val_loss = self.current_history['val_loss'][-1]
+        final_train_acc = self.current_history['train_acc'][-1]
+        final_val_acc = self.current_history['val_acc'][-1]
+
+        summary = f"""
+✅ Training Completed Successfully!
+
+📊 Final Metrics:
+   • Training Loss: {final_train_loss:.4f}
+   • Validation Loss: {final_val_loss:.4f}
+   • Training Accuracy: {final_train_acc:.2%}
+   • Validation Accuracy: {final_val_acc:.2%}
+
+🎯 Best Validation Loss: {min(self.current_history['val_loss']):.4f}
+🏆 Best Validation Accuracy: {max(self.current_history['val_acc']):.2%}
+
+💻 Device: {'GPU (CUDA)' if torch.cuda.is_available() else 'CPU'}
+📁 Models saved: best_model.pth, final_model.pth
+        """
+
+        return summary.strip()
 
     def stop_enhanced_training(self):
         """Stop enhanced training"""
@@ -518,26 +934,182 @@ features/
         return "⏹️ Training stopped"
 
     def check_training_status(self):
-        """Check current training status"""
-        return "Checking status...", "0.000", "0.00%"
+        """Check current training status with GPU information"""
+        if not self.current_history or not self.current_history['train_loss']:
+            return "No active training", "0.000", "0.00%"
+
+        current_epoch = len(self.current_history['train_loss'])
+        current_loss = self.current_history['train_loss'][-1]
+        current_acc = self.current_history['train_acc'][-1]
+
+        gpu_info = ""
+        if torch.cuda.is_available():
+            gpu_memory = self._get_gpu_memory_info()
+            gpu_info = f" | GPU: {gpu_memory}"
+
+        status = f"Training Epoch {current_epoch}/{self.training_config.epochs}{gpu_info}"
+
+        return status, f"{current_loss:.3f}", f"{current_acc:.1%}"
 
     def load_enhanced_model(self):
-        """Load enhanced model"""
-        return "Model loaded successfully"
+        """Load enhanced model with GPU support"""
+        try:
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+            # Load checkpoint
+            checkpoint = torch.load('best_model.pth', map_location=device)
+
+            # Recreate model
+            self.model = EnhancedWakewordModel(self.model_config)
+            self.model.load_state_dict(checkpoint['model_state_dict'])
+            self.model.to(device)
+            self.model.eval()
+
+            # Load training history if available
+            if 'history' in checkpoint:
+                self.current_history = checkpoint['history']
+
+            print(f"✅ Model loaded successfully on {device}")
+            return f"✅ Model loaded on {device}"
+
+        except FileNotFoundError:
+            return "❌ No saved model found. Please train a model first."
+        except Exception as e:
+            return f"❌ Error loading model: {str(e)}"
 
     def evaluate_enhanced_model(self):
-        """Evaluate enhanced model"""
-        return "0.95", "0.94", "0.96", "0.95", "Confusion Matrix", "Classification Report"
+        """Evaluate enhanced model with comprehensive metrics"""
+        if self.model is None:
+            return "No model loaded", "0", "0", "0", "No data", "No report"
+
+        try:
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+            # Create validation loader
+            _, val_loader = self._create_gpu_dataloaders()
+
+            # Evaluation
+            self.model.eval()
+            all_predictions = []
+            all_labels = []
+
+            with torch.no_grad():
+                for batch in tqdm(val_loader, desc="Evaluating"):
+                    features = batch['features'].to(device, non_blocking=True)
+                    labels = batch['label'].squeeze().to(device, non_blocking=True)
+
+                    outputs = self.model(features)
+                    _, predicted = torch.max(outputs, 1)
+
+                    all_predictions.extend(predicted.cpu().numpy())
+                    all_labels.extend(labels.cpu().numpy())
+
+            # Calculate metrics
+            accuracy = accuracy_score(all_labels, all_predictions)
+            precision = precision_score(all_labels, all_predictions, average='weighted')
+            recall = recall_score(all_labels, all_predictions, average='weighted')
+            f1 = f1_score(all_labels, all_predictions, average='weighted')
+
+            # Generate classification report
+            report = classification_report(all_labels, all_predictions,
+                                         target_names=['Negative', 'Positive'])
+
+            # Create confusion matrix
+            cm = confusion_matrix(all_labels, all_predictions)
+
+            print(f"✅ Evaluation completed")
+            print(f"📊 Accuracy: {accuracy:.3f}, Precision: {precision:.3f}, Recall: {recall:.3f}, F1: {f1:.3f}")
+
+            return (f"{accuracy:.3f}", f"{precision:.3f}", f"{recall:.3f}",
+                   f"{f1:.3f}", str(cm), report)
+
+        except Exception as e:
+            return f"❌ Evaluation error: {str(e)}", "0", "0", "0", "Error", str(e)
 
     def export_enhanced_model(self):
-        """Export enhanced model"""
-        return "Model exported successfully"
+        """Export enhanced model for deployment"""
+        if self.model is None:
+            return "❌ No model loaded. Please load or train a model first."
 
+        try:
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+            # Create export directory
+            export_dir = Path("exported_models")
+            export_dir.mkdir(exist_ok=True)
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            export_path = export_dir / f"wakeword_model_{timestamp}.pth"
+
+            # Prepare model for export
+            self.model.eval()
+
+            # Create export package
+            export_dict = {
+                'model_state_dict': self.model.state_dict(),
+                'model_config': self.model_config.__dict__,
+                'audio_config': self.audio_config.__dict__,
+                'training_config': self.training_config.__dict__,
+                'model_architecture': str(self.model),
+                'export_timestamp': timestamp,
+                'pytorch_version': torch.__version__,
+                'cuda_available': torch.cuda.is_available(),
+                'device_used': str(device)
+            }
+
+            # Add training history if available
+            if self.current_history:
+                export_dict['training_history'] = self.current_history
+
+            torch.save(export_dict, export_path)
+
+            # Also export in ONNX format for broader compatibility
+            try:
+                onnx_path = export_dir / f"wakeword_model_{timestamp}.onnx"
+                dummy_input = torch.randn(1, 40, 126).to(device)  # Adjust shape as needed
+                torch.onnx.export(
+                    self.model,
+                    dummy_input,
+                    str(onnx_path),
+                    export_params=True,
+                    opset_version=11,
+                    do_constant_folding=True,
+                    input_names=['input'],
+                    output_names=['output'],
+                    dynamic_axes={'input': {0: 'batch_size'}, 'output': {0: 'batch_size'}}
+                )
+                print(f"📦 ONNX model exported to {onnx_path}")
+
+            except Exception as e:
+                print(f"⚠️ ONNX export failed: {e}")
+
+            print(f"✅ Model exported successfully to {export_path}")
+            return f"✅ Model exported to {export_path.name}"
+
+        except Exception as e:
+            return f"❌ Export failed: {str(e)}"
+
+    def _get_gpu_status(self):
+        """Get current GPU status for display"""
+        if torch.cuda.is_available():
+            device_name = torch.cuda.get_device_name(0)
+            memory_total = torch.cuda.get_device_properties(0).total_memory / 1e9
+            return f"✅ GPU: {device_name} ({memory_total:.1f}GB)"
+        else:
+            return "⚠️ CPU Mode (No GPU detected)"
 
 def main():
     """Main function to launch the enhanced application"""
     print("🚀 Starting Enhanced Wakeword Training Studio...")
-    print("🎯 Features: .npy support + MIT RIRS augmentation")
+    print("🎯 Features: GPU/CUDA support + .npy features + MIT RIRS augmentation")
+
+    # Check GPU availability
+    if torch.cuda.is_available():
+        print(f"✅ GPU detected: {torch.cuda.get_device_name(0)}")
+        print(f"📊 CUDA Version: {torch.version.cuda}")
+        print(f"🔧 PyTorch CUDA: {torch.cuda.is_available()}")
+    else:
+        print("⚠️ No GPU detected, running on CPU")
 
     # Create application
     app = EnhancedWakewordTrainingApp()

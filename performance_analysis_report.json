@@ -1,0 +1,148 @@
+{
+  "analysis_timestamp": "2025-09-25T16:59:34.695697",
+  "system_info": {
+    "pytorch_version": "2.1.2+cu118",
+    "cuda_available": true,
+    "cuda_version": "11.8",
+    "gpu_name": "NVIDIA GeForce RTX 3060 Ti",
+    "cpu_count": 32,
+    "total_memory_gb": 68.242825216,
+    "available_memory_gb": 20.348526592
+  },
+  "feature_extraction_analysis": {
+    "total_files": 10,
+    "successful_extractions": 10,
+    "avg_extraction_time": 0.0,
+    "min_extraction_time": 0.0,
+    "max_extraction_time": 0.0,
+    "std_extraction_time": 0.0,
+    "avg_memory_increase": -0.08999999999999915,
+    "avg_cpu_usage": 34.95,
+    "avg_gpu_memory_increase": 0.0,
+    "cache_stats": {
+      "cache_size": 47700,
+      "hits": 10,
+      "misses": 0,
+      "hit_rate": 1.0,
+      "total_requests": 10
+    },
+    "performance_stats": {
+      "performance_metrics": {
+        "total_extraction_time": 0.0,
+        "total_files_processed": 0,
+        "avg_extraction_time": 0.0,
+        "cpu_usage_peak": 0.0,
+        "memory_usage_peak": 0.0,
+        "gpu_available": true,
+        "gpu_used": false,
+        "cache_hit_rate": 0.0
+      },
+      "cache_statistics": {
+        "cache_size": 47700,
+        "hits": 10,
+        "misses": 0,
+        "hit_rate": 1.0,
+        "total_requests": 10
+      },
+      "system_info": {
+        "cpu_count": 32,
+        "total_memory_gb": 68.242825216,
+        "available_memory_gb": 16.615948288,
+        "gpu_available": true,
+        "gpu_name": "NVIDIA GeForce RTX 3060 Ti",
+        "gpu_memory_total_gb": 8.589410304
+      }
+    }
+  },
+  "dataset_loading_analysis": {
+    "dataset_size": 257437,
+    "loading_time": 6.357208013534546,
+    "positive_samples": 14806,
+    "negative_samples": 242631,
+    "avg_item_load_time": 0.0496295166015625,
+    "min_item_load_time": 0.0062541961669921875,
+    "max_item_load_time": 2.8312013149261475,
+    "dataset_stats": {
+      "total_samples": 257437,
+      "positive_samples": 14806,
+      "negative_samples": 242631,
+      "feature_samples": 0,
+      "audio_samples": 257437,
+      "balance_ratio": 0.061022705260248646,
+      "rirs_available": false,
+      "feature_cache_available": false
+    }
+  },
+  "gpu_utilization_analysis": {
+    "gpu_available": true,
+    "gpu_name": "NVIDIA GeForce RTX 3060 Ti",
+    "total_gpu_memory_gb": 8.589410304,
+    "initial_gpu_memory_gb": 0.0,
+    "initial_gpu_reserved_gb": 0.0,
+    "avg_gpu_utilization_percent": 0.0,
+    "max_gpu_utilization_percent": 0.0,
+    "min_gpu_utilization_percent": 0.0,
+    "avg_gpu_memory_allocation_gb": 0.0,
+    "gpu_samples_collected": 49,
+    "gpu_utilization_samples": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  "identified_bottlenecks": [
+    "LOW_GPU_UTILIZATION: GPU utilization < 5% during extraction"
+  ],
+  "optimization_recommendations": [
+    "Move feature extraction to GPU using torchaudio.transforms.MelSpectrogram",
+    "Implement batch processing on GPU for multiple audio files",
+    "Use CUDA-accelerated libraries for audio processing",
+    "Consider using NVIDIA RAPIDS for GPU-accelerated signal processing"
+  ]
+}
