@@ -1924,17 +1924,30 @@ def main():
         os.makedirs("claudedocs", exist_ok=True)
 
     # Create and launch interface
+    logger.info("Creating Gradio interface...")
     interface = create_gradio_interface()
 
+    logger.info("Interface created successfully. Launching server...")
+    logger.info("Server configuration: host=0.0.0.0, port=7860, share=False, debug=True, inbrowser=True")
+
     # Launch with enhanced configuration
-    interface.launch(
-        server_name="0.0.0.0",
-        server_port=7860,
-        share=False,
-        debug=True,
-        show_error=True,
-        inbrowser=True
-    )
+    try:
+        interface.launch(
+            server_name="0.0.0.0",
+            server_port=7860,
+            share=False,
+            debug=True,
+            show_error=True,
+            inbrowser=True
+        )
+        logger.info("Server launched successfully!")
+    except Exception as e:
+        logger.error(f"Failed to launch server: {e}")
+        logger.error(f"Error type: {type(e).__name__}")
+        logger.error(f"Error details: {str(e)}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
+        raise e
 
 # Add additional utility functions for dataset management
 def validate_dataset_requirements():
@@ -2001,7 +2014,6 @@ def get_dataset_health_report():
             'recommendations': ["Please check dataset structure manually"]
         }
 
-# Update the footer version
-# In the create_gradio_interface function, update the footer to:
-# <p><strong>Enhanced Wakeword Detection System v3.0</strong></p>
-# <p>🔧 Fixed pickle error | 📊 Enhanced live monitoring | ⚡ GPU accelerated | 🤖 Automated dataset management</p>
+# Add the proper entry point
+if __name__ == "__main__":
+    main()
