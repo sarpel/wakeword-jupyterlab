@@ -1,0 +1,14 @@
+{
+  "num_samples": 65836,
+  "feature_shape": [
+    80,
+    54
+  ],
+  "augmented": false,
+  "created_at": "2025-09-25T20:32:07.748217",
+  "audio_config": {
+    "sample_rate": 16000,
+    "duration": 1.7,
+    "n_mels": 80
+  }
+}

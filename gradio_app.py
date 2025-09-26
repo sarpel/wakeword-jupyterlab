@@ -330,6 +330,7 @@ class WakewordTrainer:
         self.current_epoch = 0
         self.is_training = False
         self.training_complete = False
+        self.batch_progress_str = ""
 
     def train_epoch(self, train_loader, progress_callback=None):
         self.model.train()
@@ -354,7 +355,7 @@ class WakewordTrainer:
             total += target.size(0)
             correct += (predicted == target).sum().item()
 
-            if progress_callback and batch_idx % 10 == 0:
+            if progress_callback:
                 progress = (batch_idx + 1) / len(train_loader) * 100
                 progress_callback(progress, batch_idx + 1, len(train_loader))
 
@@ -751,8 +752,8 @@ class WakewordTrainingApp:
             # Use single-process loading there for stability.
             import os as _os
             _num_workers = 0 if _os.name == 'nt' else 2
-            self.train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=_num_workers, collate_fn=collate_fn)
-            self.val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=_num_workers, collate_fn=collate_fn)
+            self.train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=_num_workers)
+            self.val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=_num_workers)
 
             data_info = f"""
 ✅ Veri Yükleme Başarılı!
@@ -797,17 +798,19 @@ class WakewordTrainingApp:
             return f"Eğitim başlatma hatası: {str(e)}"
 
     def update_progress(self, progress, current_batch, total_batches):
-        # This will be called during training to update UI
-        pass
+        progress_percent = (current_batch / total_batches) * 100
+        self.trainer.batch_progress_str = f"Batch: {current_batch}/{total_batches} ({progress_percent:.2f}%)"
 
     def get_training_status(self):
         if not self.trainer.is_training and not self.trainer.training_complete:
-            return "Eğitim başlatılmadı", []
+            return "Eğitim başlatılmadı", go.Figure(), ""
 
         if self.trainer.is_training:
             status = f"Eğitim devam ediyor - Epoch {self.trainer.current_epoch}/{self.trainer.config.EPOCHS}"
+            batch_progress = self.trainer.batch_progress_str
         else:
             status = f"Eğitim tamamlandı - En iyi validation accuracy: {self.trainer.best_val_acc:.2f}%"
+            batch_progress = ""
 
         # Create live plots
         if len(self.trainer.train_losses) > 0:
@@ -825,7 +828,7 @@ class WakewordTrainingApp:
             fig = go.Figure()
             fig.add_annotation(text="Henüz eğitim verisi yok", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
 
-        return status, fig
+        return status, fig, batch_progress
 
     def stop_training(self):
         if self.trainer.is_training:
@@ -1062,6 +1065,7 @@ def create_enhanced_interface():
                             save_btn = gr.Button("💾 Save Model", variant="secondary")
 
                         training_status = gr.Textbox(label="Training Status", interactive=False)
+                        batch_progress_label = gr.Label(label="Batch Progress")
 
                         # Live plots
                         training_plots = gr.Plot(label="Training Progress")
@@ -1241,7 +1245,7 @@ def create_enhanced_interface():
         # Auto-refresh training plots
         timer.tick(
             update_training_plots,
-            outputs=[training_status, training_plots]
+            outputs=[training_status, training_plots, batch_progress_label]
         )
 
         # Update learning rate when dropdown changes
